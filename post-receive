@@ -80,7 +80,7 @@ echo "From:$from" >> $tmp_file_headers
 echo "To:$to" >> $tmp_file_headers
 echo "Subject:$subject" >> $tmp_file_headers
 echo "Content-Type: text/html; charset=UTF-8" >> $tmp_file_headers
-mail_complet="$(cat $tmp_file_headers $tmp_file_content)"
+mail_content="$(cat $tmp_file_headers $tmp_file_content)"
 echo "$mail_content" | sendmail -t
 
 rm $tmp_file_content $tmp_file_headers
