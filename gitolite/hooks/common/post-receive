@@ -1,0 +1,225 @@
+#!/bin/bash
+#
+# file : gitolite:/home/bin/repository/myrepo/hooks/post-receive
+# first draft : https://gist.github.com/Asenar/4621684
+# repo : https://github.com/Asenar/gitolite-deploy
+# desc : This hooks will update a git repository (with git pull) after you "git push"
+# from your local workstation
+#
+# author : Michaël Marineti
+# creation : 2012-09-21
+# modified : 2013-06-20
+#
+# TODO: 
+# - 00000000 bug for tags/branches
+# - replace "if (test ..." by "if [ ..."
+# - Handle remote repositories deployment
+#
+# CHANGELOG
+# 2012-09-26 : 
+#   a branch other than master can be updated
+# 2012-10-05 :
+#   improving things, with the remote scripts
+# 2013-01-24 :
+#   rename variables / english speaking 
+# 2013-06-19 :
+#   loop for each configuration key
+#   replaced "git reset --hard" by "git merge --ff-only --commit origin/$branch
+#   less output, better output
+#   use git merge-base --is-ancestor for diverged/ornot branch
+#   use "git diff --name-only" for modified files
+#   use "git ls-files -o" for untracked files
+#   better html/css/styles
+# 2013-06-20 :
+#   -gist/+github :)
+#
+# INSTALLATION
+#
+#
+# - put that file in /home/git/.gitolite/hooks/common to handle every repositories :)
+# - chmod +x
+# - create dir /home/git/deploy/conf/ ( DEPLOY_CONFIG_DIR)
+# - file owner configuration/rights/umask
+#
+#  <oldrev> <newrev> <refname>
+# For example:
+#  aa453216d1b3e49e7f6f98441fa56946ddcd6a20 68f7abf4e6f922807889f52bc043ecd31b79f814 refs/heads/master
+# note michael : delete a branch have some problems
+#remote: fatal: Invalid revision range 87187a0205f5a1d8d93bca73de40d69e8b338a99..0000000000000000000000000000000000000000
+#remote: fatal: bad object 0000000000000000000000000000000000000000
+# - [deleted]         testvide
+
+# send me bug reports
+from=git@hostname.com
+to=myself@hostname.com
+
+DEPLOY_CONFIG_DIR=/home/git/deploy/conf
+
+read oldrev newrev refname
+
+if [ $(git rev-parse --is-bare-repository) = true ]
+then
+	REPOSITORY_BASENAME=$(basename "$PWD")
+else
+	REPOSITORY_BASENAME=$(basename $(readlink -nf "$PWD"/..))
+fi
+repo_name=${REPOSITORY_BASENAME%.git}
+branch=${refname#refs/heads/}
+
+
+##### START LOCAL DEPLOY SCRIPT #####
+if (test -z "$repo_name" ) then
+	echo "repo_name is missing oO"
+	exit 1
+fi
+
+if [ -f "$DEPLOY_CONFIG_DIR/$repo_name.conf" ]; then
+	# local deploy
+	# echo "local deploy"
+	source $DEPLOY_CONFIG_DIR/$repo_name.conf
+else
+	echo "no deploy:missing source $DEPLOY_CONFIG_DIR/$repo_name.conf"
+	echo "no target directory or server has been defined yet"
+fi
+
+tmp_file_headers=`mktemp`
+tmp_file_content=`mktemp`
+	echo "<html><head><title>gitolite push report</title>" >> $tmp_file_content
+	echo "<style>" >> $tmp_file_content
+	echo "body{font-family:Inconsolata,'Source Code Pro', DejaVu, Tahoma, courier}.ok,.warn,.error{font-weight:bold}" >> $tmp_file_content
+	echo "p{margin:5px;}.error{color:red;}.warn{color:orange}.ok{color:green}" >>$tmp_file_content
+	echo "h1,h2,h3{margin:5px;}.loop-title{font-weight:bold;font-size:16px}" >> $tmp_file_content
+	echo "</style>" >> $tmp_file_content
+	echo "</head><body>" >> $tmp_file_content
+	echo "<p>${#dirs[@]} directories found in config (to potentially update them)</p>" >> $tmp_file_content
+
+
+	for each_config_key in ${!dirs[@]}; do
+		echo "<fieldset><legend class='loop-title'>LOOP when config_key=$each_config_key</legend>" >> $tmp_file_content
+		if [ "$branch" = "$each_config_key" -o "$each_config_key" = "all" ]; then
+				do_update=1
+				dir=${dirs[$each_config_key]}
+			if [ "$each_config_key" = "all" ]; then
+				echo "<p>path '$dir' will be updated.</p>" >> $tmp_file_content
+			else
+				echo "<p>path '$dir' will be updated if the branch correponds.</p>" >> $tmp_file_content
+			fi
+		else
+			do_update=0
+			echo "<p>path '$dir' won't be updated.</p>" >> $tmp_file_content
+		fi
+
+		if (test -n "$dir") then
+			cd $dir
+			unset GIT_DIR
+			git_status_branch="$(git status --branch --short)"
+			fetch_origin=$(git fetch origin 2>&1)
+			last_err=$?
+			if [ "$last_err" -gt 0 ]; then
+				echo "oO last error on fetch ? $last_err"
+			fi
+			is_ancestor="$(git merge-base --is-ancestor HEAD origin/$branch; echo $?)"
+			if [ "$is_ancestor" -eq 0 ]; then
+				is_ancestor=true
+			else
+				is_ancestor=
+			fi
+			has_modified_files="$(git diff --quiet || echo 1)"
+			has_untracked_files="$(git ls-files -o | grep >/dev/null . && echo 1 || echo '')"
+			# better way to check if it's ancestor :
+			git_status_branch_humanreadable="<p>git status --branch --short<br/>$git_status_branch</p>"
+			
+			branch_to_update=$branch
+			current_branch=$(git symbolic-ref HEAD 2>/dev/null)
+			current_branch=${current_branch#refs/heads/}
+			if (test $last_err -ne 0) then
+				echo "<p style='color:red;font-weight:bold'>ERROR on git fetch origin</p>" >> $tmp_file_content
+			else
+				if (test "$current_branch" = "$branch_to_update") then
+					if (test -n "$fetch_origin" ) then
+						echo "<br/>fetch origin result: <br/>$fetch_origin</pre>" >> $tmp_file_content
+					fi
+					git_show_head="<p style='font-weight:bold'>git show HEAD</p><pre> $(git log -n1 --pretty=medium) </pre>"
+					if [ "$has_modified_files" -o "$has_untracked_files" ]; then
+						echo "<p class='error'>working directory is not clean." >> $tmp_file_content
+						echo "You need to commit all changes and remove untracked files.</p>" >> $tmp_file_content
+						echo "<b>pull aborted</b>" >> $tmp_file_content
+						if [ $has_modified_files ]; then
+							echo "<fieldset><legend class='error' >has modified files</legend><pre>" >> $tmp_file_content
+							# or git diff --name-only"
+							echo "$(git diff --stat)" >> $tmp_file_content
+							echo "</pre></fieldset>" >> $tmp_file_content
+						fi
+						if [ $has_untracked_files ]; then
+							echo "<fieldset><legend class='error'>has untracked files</legend><pre>" >> $tmp_file_content
+							echo "$(git ls-files -o  )" >> $tmp_file_content
+							echo "</pre></fieldset>" >> $tmp_file_content
+						fi
+					else
+						echo "<p>No modified, no tracked files :)</p>" >> $tmp_file_content
+						if [ -z "$is_ancestor" ]; then
+							echo "<p class='error'>CANCELLED : branch is not ancestor($is_ancestor) (maybe it's in the future, or has diverged)</p>" >> $tmp_file_content
+							echo "$git_status_branch_humanreadable" >> $tmp_file_content
+						else
+							# TODO : replace that by "if can-do-fast-forward"
+							# MERGE : $(git merge --ff-only` to attempt the ff)
+							# JUST CHECKS : $(git merge-base --is-ancestor HEAD HEAD@{u}; echo $?)
+							if (test $last_err -eq 0) then
+								echo "<p> git merge --ff-only --commit origin/$branch <pre>" >> $tmp_file_content
+								git merge --ff-only --commit origin/$branch >> $tmp_file_content 2>&1
+								last_err=$?
+								echo '</pre></p>' >> $tmp_file_content
+								if ( test $last_err -ne 0 ) then
+									echo "<p class='error'>ERROR on git merge --ff-only --commit origin/$branch</p>" >> $tmp_file_content
+								else
+									echo "<p class='ok'>MAJ OK</p>" >> $tmp_file_content
+								fi
+							fi
+						fi
+					fi
+					echo "<small>" >> $tmp_file_content
+					echo "$git_show_head" >> $tmp_file_content
+					echo "</small>" >> $tmp_file_content
+				else
+					echo "<p class='warn'>MAJ SKIPPED (branch used=$current_branch instead of $branch_to_update)</p>" >> $tmp_file_content
+				fi
+			fi
+		fi
+		##### STOP LOCAL DEPLOY SCRIPT #####
+		echo '</fieldset>' >> $tmp_file_content
+	done
+
+
+
+################## SEND THAT EVERYTIME #############
+echo "<fieldset><legend class='ok'>GITOLITE</legend>" >> $tmp_file_content
+echo "<p><b>$refname</b> has been updated (from <b>$oldrev</b> to <b>$newrev</b>) </p>" >> $tmp_file_content
+echo "<p>commit log:<br/><pre>" >> $tmp_file_content
+if (test -n "$oldrev") then
+	git log --pretty=oneline --abbrev-commit $oldrev..$newrev | sed "s#\n#<br/>#" >> $tmp_file_content
+fi
+echo "</pre></p>" >> $tmp_file_content
+echo "<p>last commit details: <pre>" >> $tmp_file_content
+git show $newrev --oneline |tr "<" "&lt;"|tr ">" "&gt;"| sed "s#\n#<br/>#" >> $tmp_file_content
+echo "</pre></p></fieldset>" >> $tmp_file_content
+echo "</body></html>" >> $tmp_file_content
+######################################################
+
+
+### mail content ###
+subject="[DEPLOY $repo_name $branch] `date` - push result "
+
+### mail headers ###
+echo "From: $from" >> $tmp_file_headers
+echo "To: $to" >> $tmp_file_headers
+echo "Subject: $subject" >> $tmp_file_headers
+echo "Content-Type: text/html; charset=UTF-8" >> $tmp_file_headers
+mail_content="$(cat $tmp_file_headers $tmp_file_content)"
+echo "$mail_content" | /usr/sbin/sendmail -t 
+
+echo "notification mail sent to $to"
+
+rm $tmp_file_content $tmp_file_headers
+
+exit 0
+
