@@ -32,6 +32,7 @@
 #  functions info, warning, notice, success, fail
 #  Added config file for email sender and dest
 #  More info displayed in console
+#  handling tags like new branch but better
 #
 # TODO
 # * 00000000 bug for tags
@@ -114,6 +115,7 @@ else
 	REPOSITORY_BASENAME="$(basename $(readlink -nf "$PWD"/..))"
 fi
 repo_name="${REPOSITORY_BASENAME%.git}"
+# TODO : handle cases like refs/tags/0.1
 branch="${refname#refs/heads/}"
 
 
@@ -254,7 +256,11 @@ tmp_file_content=`mktemp`
 ################## SEND THAT EVERYTIME #############
 echo "<fieldset><legend class='ok'>GITOLITE</legend>" >> $tmp_file_content
 if [ "$oldrev" = "$ZERO" ]; then
-	echo "<p>new branch <b>$refname</b> pushed and setted to <b>$newrev</b>" >> $tmp_file_content
+		if [[ "$branch" = "$refname" ]]; then 
+			echo "<p>new tag <b>$refname</b> set to <b>$newrev</b>" >> $tmp_file_content
+		else
+			echo "<p>new branch <b>$refname</b> pushed and set to <b>$newrev</b>" >> $tmp_file_content
+		fi
 else
 	echo "<p><b>$refname</b> has been updated (from <b>$oldrev</b> to <b>$newrev</b>) </p>" >> $tmp_file_content
 fi
