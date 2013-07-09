@@ -94,7 +94,7 @@ else
 	fail "Unable to continue without that configuration file."
 fi
 
-if [ -z "$from" ] -o [ -z "$to" ]; then
+if [[ -z "$from" ]] || [[ -z "$to" ]]; then
 	notice "please create '$DEPLOY_CONFIG_DIR/config' containing :"
 	echo "#!/bin/bash"
 	echo "from=sender@yourdomain.com"
@@ -150,7 +150,7 @@ tmp_file_content=`mktemp`
 	for each_config_key in ${!dirs[@]}; do
 		dir=${dirs[$each_config_key]}
 		echo "<fieldset><legend class='loop-title'>LOOP when config_key=$each_config_key</legend>" >> $tmp_file_content
-		if [ "$branch" = "$each_config_key" -o "$each_config_key" = "all" ]; then
+		if [[ "$branch" = "$each_config_key" ]] || [[ "$each_config_key" = "all" ]]; then
 				do_update=1
 			info "configuration found for $dir"
 			if [ "$each_config_key" = "all" ]; then
@@ -253,7 +253,7 @@ if [ "$oldrev" = "$ZERO" ]; then
 else
 	echo "<p><b>$refname</b> has been updated (from <b>$oldrev</b> to <b>$newrev</b>) </p>" >> $tmp_file_content
 fi
-if [ -n "$oldrev" ] -a [ "$oldrev" != "$ZERO" ]; then
+if [[ -n "$oldrev" ]] && [[ "$oldrev" != "$ZERO" ]]; then
 	echo "<p>commit logs:<br/><pre>" >> $tmp_file_content
 	git log --pretty=oneline --abbrev-commit $oldrev..$newrev | sed "s#\n#<br/>#" >> $tmp_file_content
 	echo "</pre></p>" >> $tmp_file_content
