@@ -25,13 +25,13 @@
 #   use "git ls-files -o" for untracked files
 #   better html/css/styles
 # 2013-06-20 :
-#   bugfix dir in loop no longer missing
+#  bugfix dir in loop no longer missing
 # 2013-07-09 :
 #   colors in remote informations
-#   ZERO for the "zero sha1"
-#   functions info, warning, notice, success, fail
-#   Added config file for email sender and dest
-#   More info displayed in console
+#  ZERO for the "zero sha1"
+#  functions info, warning, notice, success, fail
+#  Added config file for email sender and dest
+#  More info displayed in console
 #
 # TODO
 # * 00000000 bug for tags
@@ -59,6 +59,8 @@
 # send me bug reports
 
 ####################################################
+# set -x  # debug mode
+
 ZERO="0000000000000000000000000000000000000000"
 # some functions to put in a library later
 warning () {
@@ -80,7 +82,7 @@ fail () {
 }
 ####################################################
 
-DEPLOY_CONFIG_DIR=/home/git/deploy/conf
+DEPLOY_CONFIG_DIR="/home/git/deploy/conf"
 if [ -f "$DEPLOY_CONFIG_DIR/config" ]; then
 	# local deploy
 	# echo "local deploy"
@@ -107,12 +109,12 @@ read oldrev newrev refname
 
 if [ $(git rev-parse --is-bare-repository) = true ]
 then
-	REPOSITORY_BASENAME=$(basename "$PWD")
+	REPOSITORY_BASENAME="$(basename "$PWD")"
 else
-	REPOSITORY_BASENAME=$(basename $(readlink -nf "$PWD"/..))
+	REPOSITORY_BASENAME="$(basename $(readlink -nf "$PWD"/..))"
 fi
-repo_name=${REPOSITORY_BASENAME%.git}
-branch=${refname#refs/heads/}
+repo_name="${REPOSITORY_BASENAME%.git}"
+branch="${refname#refs/heads/}"
 
 
 # echo "check prod ..."
@@ -150,7 +152,7 @@ tmp_file_content=`mktemp`
 	for each_config_key in ${!dirs[@]}; do
 		dir=${dirs[$each_config_key]}
 		echo "<fieldset><legend class='loop-title'>LOOP when config_key=$each_config_key</legend>" >> $tmp_file_content
-		if [[ "$branch" = "$each_config_key" ]] || [[ "$each_config_key" = "all" ]]; then
+		if [[ "$branch" = "$each_config_key" ]] || [[ "$each_config_key" = "all" ]]; then
 				do_update=1
 			info "configuration found for $dir"
 			if [ "$each_config_key" = "all" ]; then
@@ -168,6 +170,9 @@ tmp_file_content=`mktemp`
 			cd $dir
 			unset GIT_DIR
 			git_status_branch="$(git status --branch --short)"
+			if ! [[ -w ".git/logs/refs/remotes/origin/master" ]]; then
+				fail ".git/logs/refs/remotes/origin/master is not writable. Unable to fetch origin"
+			fi
 			fetch_origin=$(git fetch origin 2>&1)
 			last_err=$?
 			if [ "$last_err" -gt 0 ]; then
@@ -187,11 +192,11 @@ tmp_file_content=`mktemp`
 			branch_to_update=$branch
 			current_branch=$(git symbolic-ref HEAD 2>/dev/null)
 			current_branch=${current_branch#refs/heads/}
-			if [ $last_err -ne 0 ]; then
+			if [[ "$last_err" -ne 0 ]]; then
 				echo "<p style='color:red;font-weight:bold'>ERROR on git fetch origin</p>" >> $tmp_file_content
 			else
-				if [ "$current_branch" = "$branch_to_update"]; then
-					if [ -n "$fetch_origin" ]; then
+				if [[ "$current_branch" = "$branch_to_update" ]]; then
+					if [[ -n "$fetch_origin" ]]; then
 						echo "<br/>fetch origin result: <br/>$fetch_origin</pre>" >> $tmp_file_content
 					fi
 					git_show_head="<p style='font-weight:bold'>git show HEAD</p><pre> $(git log -n1 --pretty=medium) </pre>"
