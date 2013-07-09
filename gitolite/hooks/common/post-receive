@@ -1,21 +1,15 @@
 #!/bin/bash
 #
 # file : gitolite:/home/bin/repository/myrepo/hooks/post-receive
-# first draft : https://gist.github.com/Asenar/4621684
-# repo : https://github.com/Asenar/gitolite-deploy
+#        https://gist.github.com/Asenar/4621684
 # desc : This hooks will update a git repository (with git pull) after you "git push"
 # from your local workstation
 #
 # author : Michaël Marineti
 # creation : 2012-09-21
-# modified : 2013-06-20
+# modified : 2013-07-09
 #
-# TODO: 
-# - 00000000 bug for tags/branches
-# - replace "if (test ..." by "if [ ..."
-# - Handle remote repositories deployment
-#
-# CHANGELOG
+# LOG
 # 2012-09-26 : 
 #   a branch other than master can be updated
 # 2012-10-05 :
@@ -30,17 +24,30 @@
 #   use "git diff --name-only" for modified files
 #   use "git ls-files -o" for untracked files
 #   better html/css/styles
-# 2013-06-20 :
-#   -gist/+github :)
+# 2013-06-20 :
+#   bugfix dir in loop no longer missing
+# 2013-07-09 :
+#   colors in remote informations
+#   ZERO for the "zero sha1"
+#   functions info, warning, notice, success, fail
+#   Added config file for email sender and dest
+#   More info displayed in console
 #
+# TODO
+# * 00000000 bug for tags
 # INSTALLATION
 #
+# localhost: local (developer)
+# devhost: used for preprod and gitolite
+#
+# cd /home/www/dev.mywebsite.com
+# git clone /home/git/repositories/mywebsite.com
 #
 # - put that file in /home/git/.gitolite/hooks/common to handle every repositories :)
-# - chmod +x
-# - create dir /home/git/deploy/conf/ ( DEPLOY_CONFIG_DIR)
-# - file owner configuration/rights/umask
 #
+# The "post-receive" script is run after receive-pack has accepted a pack
+# and the repository has been updated.  It is passed arguments in through
+# stdin in the form
 #  <oldrev> <newrev> <refname>
 # For example:
 #  aa453216d1b3e49e7f6f98441fa56946ddcd6a20 68f7abf4e6f922807889f52bc043ecd31b79f814 refs/heads/master
@@ -50,10 +57,51 @@
 # - [deleted]         testvide
 
 # send me bug reports
-from=git@hostname.com
-to=myself@hostname.com
+
+####################################################
+ZERO="0000000000000000000000000000000000000000"
+# some functions to put in a library later
+warning () {
+	printf "\r  [\033[00;33mWARN\033[0m] $1\n"
+}
+notice () {
+	printf "\r  [\033[00;34mINFO\033[0m] $1\n"
+}
+info () {
+	printf "  [ \033[00;34m..\033[0m ] $1"
+}
+success () {
+	printf "\r\033[2K  [ \033[00;32mOK\033[0m ] $1\n"
+}
+fail () {
+	printf "\r\033[2K  [\033[0;31mFAIL\033[0m] $1\n"
+	echo ''
+	exit 1
+}
+####################################################
 
 DEPLOY_CONFIG_DIR=/home/git/deploy/conf
+if [ -f "$DEPLOY_CONFIG_DIR/config" ]; then
+	# local deploy
+	# echo "local deploy"
+	source $DEPLOY_CONFIG_DIR/config
+else
+	notice "please create '$DEPLOY_CONFIG_DIR/config' containing :"
+	echo "#!/bin/bash"
+	echo "from=sender@yourdomain.com"
+	echo "to=dest@yourdomain.com,user2@yourdomain.com"
+	echo ""
+	fail "Unable to continue without that configuration file."
+fi
+
+if [ -z "$from" ] -o [ -z "$to" ]; then
+	notice "please create '$DEPLOY_CONFIG_DIR/config' containing :"
+	echo "#!/bin/bash"
+	echo "from=sender@yourdomain.com"
+	echo "to=dest@yourdomain.com,user2@yourdomain.com"
+	echo ""
+	fail "Unable to continue without that configuration file."
+fi
 
 read oldrev newrev refname
 
@@ -67,10 +115,15 @@ repo_name=${REPOSITORY_BASENAME%.git}
 branch=${refname#refs/heads/}
 
 
+# echo "check prod ..."
+# tmp_content=$(ssh serveur-prod scripts/deploy $branch $repo_name)
+# echo "done."
+# echo "<h3>prod PUSH RESULT</h3>" >> $tmp_file_content
+# echo "$tmp_content" >> $tmp_file_content
+# echo "<hr/>" >> $tmp_file_content
 ##### START LOCAL DEPLOY SCRIPT #####
-if (test -z "$repo_name" ) then
-	echo "repo_name is missing oO"
-	exit 1
+if [ -z "$repo_name" ]; then
+	fail "repo_name is missing oO"
 fi
 
 if [ -f "$DEPLOY_CONFIG_DIR/$repo_name.conf" ]; then
@@ -78,8 +131,8 @@ if [ -f "$DEPLOY_CONFIG_DIR/$repo_name.conf" ]; then
 	# echo "local deploy"
 	source $DEPLOY_CONFIG_DIR/$repo_name.conf
 else
-	echo "no deploy:missing source $DEPLOY_CONFIG_DIR/$repo_name.conf"
-	echo "no target directory or server has been defined yet"
+	warning "no configuration file found for deployment."
+	warning "create $DEPLOY_CONFIG_DIR/$repo_name.conf to avoid this message"
 fi
 
 tmp_file_headers=`mktemp`
@@ -95,28 +148,30 @@ tmp_file_content=`mktemp`
 
 
 	for each_config_key in ${!dirs[@]}; do
+		dir=${dirs[$each_config_key]}
 		echo "<fieldset><legend class='loop-title'>LOOP when config_key=$each_config_key</legend>" >> $tmp_file_content
 		if [ "$branch" = "$each_config_key" -o "$each_config_key" = "all" ]; then
 				do_update=1
-				dir=${dirs[$each_config_key]}
+			info "configuration found for $dir"
 			if [ "$each_config_key" = "all" ]; then
-				echo "<p>path '$dir' will be updated.</p>" >> $tmp_file_content
+				echo "<p>configuration found for '$dir' : update for any branch.</p>" >> $tmp_file_content
 			else
-				echo "<p>path '$dir' will be updated if the branch correponds.</p>" >> $tmp_file_content
+				echo "<p>configuration found for '$dir': update for branch '$branch' only</p>" >> $tmp_file_content
 			fi
 		else
 			do_update=0
+			info "path '$dir' won't be updated." 
 			echo "<p>path '$dir' won't be updated.</p>" >> $tmp_file_content
 		fi
 
-		if (test -n "$dir") then
+		if [ -n "$dir" ]; then
 			cd $dir
 			unset GIT_DIR
 			git_status_branch="$(git status --branch --short)"
 			fetch_origin=$(git fetch origin 2>&1)
 			last_err=$?
 			if [ "$last_err" -gt 0 ]; then
-				echo "oO last error on fetch ? $last_err"
+				warning "oO error on fetch ? $last_err"
 			fi
 			is_ancestor="$(git merge-base --is-ancestor HEAD origin/$branch; echo $?)"
 			if [ "$is_ancestor" -eq 0 ]; then
@@ -132,11 +187,11 @@ tmp_file_content=`mktemp`
 			branch_to_update=$branch
 			current_branch=$(git symbolic-ref HEAD 2>/dev/null)
 			current_branch=${current_branch#refs/heads/}
-			if (test $last_err -ne 0) then
+			if [ $last_err -ne 0 ]; then
 				echo "<p style='color:red;font-weight:bold'>ERROR on git fetch origin</p>" >> $tmp_file_content
 			else
-				if (test "$current_branch" = "$branch_to_update") then
-					if (test -n "$fetch_origin" ) then
+				if [ "$current_branch" = "$branch_to_update"]; then
+					if [ -n "$fetch_origin" ]; then
 						echo "<br/>fetch origin result: <br/>$fetch_origin</pre>" >> $tmp_file_content
 					fi
 					git_show_head="<p style='font-weight:bold'>git show HEAD</p><pre> $(git log -n1 --pretty=medium) </pre>"
@@ -164,12 +219,12 @@ tmp_file_content=`mktemp`
 							# TODO : replace that by "if can-do-fast-forward"
 							# MERGE : $(git merge --ff-only` to attempt the ff)
 							# JUST CHECKS : $(git merge-base --is-ancestor HEAD HEAD@{u}; echo $?)
-							if (test $last_err -eq 0) then
+							if [ $last_err -eq 0 ]; then
 								echo "<p> git merge --ff-only --commit origin/$branch <pre>" >> $tmp_file_content
 								git merge --ff-only --commit origin/$branch >> $tmp_file_content 2>&1
 								last_err=$?
 								echo '</pre></p>' >> $tmp_file_content
-								if ( test $last_err -ne 0 ) then
+								if [ $last_err -ne 0 ]; then
 									echo "<p class='error'>ERROR on git merge --ff-only --commit origin/$branch</p>" >> $tmp_file_content
 								else
 									echo "<p class='ok'>MAJ OK</p>" >> $tmp_file_content
@@ -193,14 +248,18 @@ tmp_file_content=`mktemp`
 
 ################## SEND THAT EVERYTIME #############
 echo "<fieldset><legend class='ok'>GITOLITE</legend>" >> $tmp_file_content
-echo "<p><b>$refname</b> has been updated (from <b>$oldrev</b> to <b>$newrev</b>) </p>" >> $tmp_file_content
-echo "<p>commit log:<br/><pre>" >> $tmp_file_content
-if (test -n "$oldrev") then
-	git log --pretty=oneline --abbrev-commit $oldrev..$newrev | sed "s#\n#<br/>#" >> $tmp_file_content
+if [ "$oldrev" = "$ZERO" ]; then
+	echo "<p>new branch <b>$refname</b> pushed and setted to <b>$newrev</b>" >> $tmp_file_content
+else
+	echo "<p><b>$refname</b> has been updated (from <b>$oldrev</b> to <b>$newrev</b>) </p>" >> $tmp_file_content
 fi
-echo "</pre></p>" >> $tmp_file_content
+if [ -n "$oldrev" ] -a [ "$oldrev" != "$ZERO" ]; then
+	echo "<p>commit logs:<br/><pre>" >> $tmp_file_content
+	git log --pretty=oneline --abbrev-commit $oldrev..$newrev | sed "s#\n#<br/>#" >> $tmp_file_content
+	echo "</pre></p>" >> $tmp_file_content
+fi
 echo "<p>last commit details: <pre>" >> $tmp_file_content
-git show $newrev --oneline |tr "<" "&lt;"|tr ">" "&gt;"| sed "s#\n#<br/>#" >> $tmp_file_content
+git show $newrev |tr "<" "&lt;"|tr ">" "&gt;"| sed "s#\n#<br/>#" >> $tmp_file_content
 echo "</pre></p></fieldset>" >> $tmp_file_content
 echo "</body></html>" >> $tmp_file_content
 ######################################################
@@ -217,7 +276,7 @@ echo "Content-Type: text/html; charset=UTF-8" >> $tmp_file_headers
 mail_content="$(cat $tmp_file_headers $tmp_file_content)"
 echo "$mail_content" | /usr/sbin/sendmail -t 
 
-echo "notification mail sent to $to"
+success "notification mail sent to $to"
 
 rm $tmp_file_content $tmp_file_headers
 
