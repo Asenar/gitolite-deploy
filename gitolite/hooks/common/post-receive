@@ -32,10 +32,12 @@
 #  functions info, warning, notice, success, fail
 #  Added config file for email sender and dest
 #  More info displayed in console
-#  handling tags like new branch but better
+#  handling tags like new branch but better
+# 2013-07-10 :
+#  no more errors when pushing tags or deleting tags/branches :)
+#  changed some IFs into some CASEs
+#  better email subject
 #
-# TODO
-# * 00000000 bug for tags
 # INSTALLATION
 #
 # localhost: local (developer)
@@ -117,7 +119,8 @@ fi
 repo_name="${REPOSITORY_BASENAME%.git}"
 # TODO : handle cases like refs/tags/0.1
 branch="${refname#refs/heads/}"
-
+# that can be a tag?
+tag="${refname#refs/tags/}"
 
 # echo "check prod ..."
 # tmp_content=$(ssh serveur-prod scripts/deploy $branch $repo_name)
@@ -175,77 +178,91 @@ tmp_file_content=`mktemp`
 			if ! [[ -w ".git/logs/refs/remotes/origin/master" ]]; then
 				fail ".git/logs/refs/remotes/origin/master is not writable. Unable to fetch origin"
 			fi
+
+			# debug mode
+			# set -x
 			fetch_origin=$(git fetch origin 2>&1)
 			last_err=$?
 			if [ "$last_err" -gt 0 ]; then
-				warning "oO error on fetch ? $last_err"
+				warning "oO error on git fetch origin (write perms in .git ? ) ? $last_err"
+				echo "$last_err"
 			fi
-			is_ancestor="$(git merge-base --is-ancestor HEAD origin/$branch; echo $?)"
-			if [ "$is_ancestor" -eq 0 ]; then
-				is_ancestor=true
-			else
-				is_ancestor=
-			fi
-			has_modified_files="$(git diff --quiet || echo 1)"
-			has_untracked_files="$(git ls-files -o | grep >/dev/null . && echo 1 || echo '')"
-			# better way to check if it's ancestor :
-			git_status_branch_humanreadable="<p>git status --branch --short<br/>$git_status_branch</p>"
-			
-			branch_to_update=$branch
-			current_branch=$(git symbolic-ref HEAD 2>/dev/null)
-			current_branch=${current_branch#refs/heads/}
-			if [[ "$last_err" -ne 0 ]]; then
-				echo "<p style='color:red;font-weight:bold'>ERROR on git fetch origin</p>" >> $tmp_file_content
-			else
-				if [[ "$current_branch" = "$branch_to_update" ]]; then
-					if [[ -n "$fetch_origin" ]]; then
-						echo "<br/>fetch origin result: <br/>$fetch_origin</pre>" >> $tmp_file_content
-					fi
-					git_show_head="<p style='font-weight:bold'>git show HEAD</p><pre> $(git log -n1 --pretty=medium) </pre>"
-					if [ "$has_modified_files" -o "$has_untracked_files" ]; then
-						echo "<p class='error'>working directory is not clean." >> $tmp_file_content
-						echo "You need to commit all changes and remove untracked files.</p>" >> $tmp_file_content
-						echo "<b>pull aborted</b>" >> $tmp_file_content
-						if [ $has_modified_files ]; then
-							echo "<fieldset><legend class='error' >has modified files</legend><pre>" >> $tmp_file_content
-							# or git diff --name-only"
-							echo "$(git diff --stat)" >> $tmp_file_content
-							echo "</pre></fieldset>" >> $tmp_file_content
-						fi
-						if [ $has_untracked_files ]; then
-							echo "<fieldset><legend class='error'>has untracked files</legend><pre>" >> $tmp_file_content
-							echo "$(git ls-files -o  )" >> $tmp_file_content
-							echo "</pre></fieldset>" >> $tmp_file_content
-						fi
+			case $refname in 
+				refs/heads/*)
+					is_ancestor="$(git merge-base --is-ancestor HEAD origin/$branch; echo $?)"
+					if [ "$is_ancestor" -eq 0 ]; then
+						is_ancestor=true
 					else
-						echo "<p>No modified, no tracked files :)</p>" >> $tmp_file_content
-						if [ -z "$is_ancestor" ]; then
-							echo "<p class='error'>CANCELLED : branch is not ancestor($is_ancestor) (maybe it's in the future, or has diverged)</p>" >> $tmp_file_content
-							echo "$git_status_branch_humanreadable" >> $tmp_file_content
-						else
-							# TODO : replace that by "if can-do-fast-forward"
-							# MERGE : $(git merge --ff-only` to attempt the ff)
-							# JUST CHECKS : $(git merge-base --is-ancestor HEAD HEAD@{u}; echo $?)
-							if [ $last_err -eq 0 ]; then
-								echo "<p> git merge --ff-only --commit origin/$branch <pre>" >> $tmp_file_content
-								git merge --ff-only --commit origin/$branch >> $tmp_file_content 2>&1
-								last_err=$?
-								echo '</pre></p>' >> $tmp_file_content
-								if [ $last_err -ne 0 ]; then
-									echo "<p class='error'>ERROR on git merge --ff-only --commit origin/$branch</p>" >> $tmp_file_content
+						is_ancestor=
+					fi
+					has_modified_files="$(git diff --quiet || echo 1)"
+					has_untracked_files="$(git ls-files -o | grep >/dev/null . && echo 1 || echo '')"
+					# better way to check if it's ancestor :
+					git_status_branch_humanreadable="<p>git status --branch --short<br/>$git_status_branch</p>"
+					
+					branch_to_update=$branch
+					current_branch=$(git symbolic-ref HEAD 2>/dev/null)
+					current_branch=${current_branch#refs/heads/}
+					if [[ "$last_err" -ne 0 ]]; then
+						echo "<p style='color:red;font-weight:bold'>ERROR on git fetch origin</p>" >> $tmp_file_content
+					else
+						if [[ "$current_branch" = "$branch_to_update" ]]; then
+							if [[ -n "$fetch_origin" ]]; then
+								echo "<br/>fetch origin result: <br/>$fetch_origin</pre>" >> $tmp_file_content
+							fi
+							git_show_head="<p style='font-weight:bold'>git show HEAD</p><pre> $(git log -n1 --pretty=medium) </pre>"
+							if [ "$has_modified_files" -o "$has_untracked_files" ]; then
+								echo "<p class='error'>working directory is not clean." >> $tmp_file_content
+								echo "You need to commit all changes and remove untracked files.</p>" >> $tmp_file_content
+								echo "<b>pull aborted</b>" >> $tmp_file_content
+								if [ $has_modified_files ]; then
+									echo "<fieldset><legend class='error' >has modified files</legend><pre>" >> $tmp_file_content
+									# or git diff --name-only"
+									echo "$(git diff --stat)" >> $tmp_file_content
+									echo "</pre></fieldset>" >> $tmp_file_content
+								fi
+								if [ $has_untracked_files ]; then
+									echo "<fieldset><legend class='error'>has untracked files</legend><pre>" >> $tmp_file_content
+									echo "$(git ls-files -o  )" >> $tmp_file_content
+									echo "</pre></fieldset>" >> $tmp_file_content
+								fi
+							else
+								echo "<p>No modified, no tracked files :)</p>" >> $tmp_file_content
+								if [ -z "$is_ancestor" ]; then
+									echo "<p class='error'>CANCELLED : branch is not ancestor($is_ancestor) (maybe it's in the future, or has diverged)</p>" >> $tmp_file_content
+									echo "$git_status_branch_humanreadable" >> $tmp_file_content
 								else
-									echo "<p class='ok'>MAJ OK</p>" >> $tmp_file_content
+									# TODO : replace that by "if can-do-fast-forward"
+									# MERGE : $(git merge --ff-only` to attempt the ff)
+									# JUST CHECKS : $(git merge-base --is-ancestor HEAD HEAD@{u}; echo $?)
+									if [ $last_err -eq 0 ]; then
+										echo "<p> git merge --ff-only --commit origin/$branch <pre>" >> $tmp_file_content
+										git merge --ff-only --commit origin/$branch >> $tmp_file_content 2>&1
+										last_err=$?
+										echo '</pre></p>' >> $tmp_file_content
+										if [ $last_err -ne 0 ]; then
+											echo "<p class='error'>ERROR on git merge --ff-only --commit origin/$branch</p>" >> $tmp_file_content
+										else
+											echo "<p class='ok'>MAJ OK</p>" >> $tmp_file_content
+										fi
+									fi
 								fi
 							fi
+							echo "<small>" >> $tmp_file_content
+							echo "$git_show_head" >> $tmp_file_content
+							echo "</small>" >> $tmp_file_content
+						else
+							echo "<p class='warn'>MAJ SKIPPED (branch used=$current_branch instead of $branch_to_update)</p>" >> $tmp_file_content
 						fi
 					fi
-					echo "<small>" >> $tmp_file_content
-					echo "$git_show_head" >> $tmp_file_content
-					echo "</small>" >> $tmp_file_content
-				else
-					echo "<p class='warn'>MAJ SKIPPED (branch used=$current_branch instead of $branch_to_update)</p>" >> $tmp_file_content
-				fi
-			fi
+				;;
+				refs/tags/*)
+					echo "Nothing done when pushing tags"
+					;;
+				*)
+					echo "not a tag, not a branch, so what is that ???"
+					;;
+			esac
 		fi
 		##### STOP LOCAL DEPLOY SCRIPT #####
 		echo '</fieldset>' >> $tmp_file_content
@@ -255,29 +272,51 @@ tmp_file_content=`mktemp`
 
 ################## SEND THAT EVERYTIME #############
 echo "<fieldset><legend class='ok'>GITOLITE</legend>" >> $tmp_file_content
-if [ "$oldrev" = "$ZERO" ]; then
-		if [[ "$branch" = "$refname" ]]; then 
-			echo "<p>new tag <b>$refname</b> set to <b>$newrev</b>" >> $tmp_file_content
-		else
-			echo "<p>new branch <b>$refname</b> pushed and set to <b>$newrev</b>" >> $tmp_file_content
-		fi
+if [[ "$oldrev" = "$ZERO" ]] || [[ "$newrev" = "$ZERO" ]]; then
+	case $refname in 
+		refs/heads/*)
+			if [[ "$newrev" = "$ZERO" ]]; then
+				echo "<p>branch <b>$refname</b> has been deleted" >> $tmp_file_content
+				email_title="branch '$branch' deleted"
+			else
+				echo "<p>new branch <b>$refname</b> pushed and set to <b>$newrev</b>" >> $tmp_file_content
+				email_title="new branch '$branch' created"
+			fi
+			;; 
+		refs/tags/*) 
+			echo "<p>new tag <b>$refname</b> pinned at <b>$newrev</b>" >> $tmp_file_content
+			if [[ "$newrev" = "$ZERO" ]]; then
+				email_title="tag '$tag' deleted"
+			else
+				email_title="new tag '$tag' created"
+			fi
+			;; 
+		*) 
+			echo "random ref <b>$refname</b> has been ... what ?" >> $tmp_file_content
+			email_title="random ref '$refname' created"
+			;;
+	esac
 else
 	echo "<p><b>$refname</b> has been updated (from <b>$oldrev</b> to <b>$newrev</b>) </p>" >> $tmp_file_content
+	email_title="branch '$branch' updated"
 fi
-if [[ -n "$oldrev" ]] && [[ "$oldrev" != "$ZERO" ]]; then
+if [[ -n "$oldrev" ]] && [[ "$oldrev" != "$ZERO" ]] && [[ "$newrev" != "$ZERO" ]]; then
 	echo "<p>commit logs:<br/><pre>" >> $tmp_file_content
 	git log --pretty=oneline --abbrev-commit $oldrev..$newrev | sed "s#\n#<br/>#" >> $tmp_file_content
 	echo "</pre></p>" >> $tmp_file_content
 fi
-echo "<p>last commit details: <pre>" >> $tmp_file_content
-git show $newrev |tr "<" "&lt;"|tr ">" "&gt;"| sed "s#\n#<br/>#" >> $tmp_file_content
-echo "</pre></p></fieldset>" >> $tmp_file_content
-echo "</body></html>" >> $tmp_file_content
+if [[ "$newrev" != "$ZERO" ]]; then
+	echo "<p>last commit details: <pre>" >> $tmp_file_content
+	git show $newrev |tr "<" "&lt;"|tr ">" "&gt;"| sed "s#\n#<br/>#" >> $tmp_file_content
+	echo "</pre></p>" >> $tmp_file_content
+fi
+	echo "</fieldset>" >> $tmp_file_content
+	echo "</body></html>" >> $tmp_file_content
 ######################################################
 
 
 ### mail content ###
-subject="[DEPLOY $repo_name $branch] `date` - push result "
+subject="[git $repo_name] $email_title "
 
 ### mail headers ###
 echo "From: $from" >> $tmp_file_headers
