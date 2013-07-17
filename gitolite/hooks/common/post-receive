@@ -7,7 +7,7 @@
 #
 # author : Michaël Marineti
 # creation : 2012-09-21
-# modified : 2013-07-09
+# modified : 2013-07-17
 #
 # LOG
 # 2012-09-26 : 
@@ -37,6 +37,8 @@
 #  no more errors when pushing tags or deleting tags/branches :)
 #  changed some IFs into some CASEs
 #  better email subject
+# 2013-07-17 :
+#  add pusher/commiter/author infos
 #
 # INSTALLATION
 #
@@ -110,6 +112,8 @@ fi
 
 read oldrev newrev refname
 
+pusher=${GL_USER}
+
 if [ $(git rev-parse --is-bare-repository) = true ]
 then
 	REPOSITORY_BASENAME="$(basename "$PWD")"
@@ -143,15 +147,16 @@ else
 fi
 
 tmp_file_headers=`mktemp`
+tmp_file_start=`mktemp`
 tmp_file_content=`mktemp`
-	echo "<html><head><title>gitolite push report</title>" >> $tmp_file_content
-	echo "<style>" >> $tmp_file_content
-	echo "body{font-family:Inconsolata,'Source Code Pro', DejaVu, Tahoma, courier}.ok,.warn,.error{font-weight:bold}" >> $tmp_file_content
-	echo "p{margin:5px;}.error{color:red;}.warn{color:orange}.ok{color:green}" >>$tmp_file_content
-	echo "h1,h2,h3{margin:5px;}.loop-title{font-weight:bold;font-size:16px}" >> $tmp_file_content
-	echo "</style>" >> $tmp_file_content
-	echo "</head><body>" >> $tmp_file_content
-	echo "<p>${#dirs[@]} directories found in config (to potentially update them)</p>" >> $tmp_file_content
+	echo "<html><head><title>gitolite push report</title>" >> $tmp_file_start
+	echo "<style>" >> $tmp_file_start
+	echo "body{font-family:Inconsolata,'Source Code Pro', DejaVu, Tahoma, courier}.ok,.warn,.error{font-weight:bold}" >> $tmp_file_start
+	echo "p{margin:5px;}.error{color:red;}.warn{color:orange}.ok{color:green}" >>$tmp_file_start
+	echo "h1,h2,h3{margin:5px;}.loop-title{font-weight:bold;font-size:16px}" >> $tmp_file_start
+	echo "</style>" >> $tmp_file_start
+	echo "</head><body>" >> $tmp_file_start
+	num_dir=${#dirs[@]}
 
 
 	for each_config_key in ${!dirs[@]}; do
@@ -272,7 +277,7 @@ tmp_file_content=`mktemp`
 
 
 ################## SEND THAT EVERYTIME #############
-echo "<fieldset><legend class='ok'>GITOLITE</legend>" >> $tmp_file_content
+echo "<fieldset><legend class='ok'>GITOLITE</legend><p>pushed by $pusher</p>" >> $tmp_file_content
 if [[ "$oldrev" = "$ZERO" ]] || [[ "$newrev" = "$ZERO" ]]; then
 	case $refname in 
 		refs/heads/*)
@@ -307,9 +312,13 @@ if [[ -n "$oldrev" ]] && [[ "$oldrev" != "$ZERO" ]] && [[ "$newrev" != "$ZERO" ]
 	echo "</pre></p>" >> $tmp_file_content
 fi
 if [[ "$newrev" != "$ZERO" ]]; then
-	echo "<p>last commit details: <pre>" >> $tmp_file_content
+	author=$(git --no-pager show $newrev -s --format='%an')
+	# commiter=$(git --no-pager show -s --format='%cn <%ce>')
+	echo "<p>last commit details ($author): <pre>" >> $tmp_file_content
 	git show $newrev |sed -e "s#<#\&lt;#g" -e "s#>#\&gt;#g" -e "s#\n#<br/>#" >> $tmp_file_content
 	echo "</pre></p>" >> $tmp_file_content
+else
+	author=$pusher
 fi
 	echo "</fieldset>" >> $tmp_file_content
 	echo "</body></html>" >> $tmp_file_content
@@ -317,19 +326,25 @@ fi
 
 
 ### mail content ###
-subject="[git $repo_name] $email_title "
+subject="[repo $repo_name ($author)] $email_title"
 
+	echo "<p>author = $author, pusher = $pusher </p>" >> $tmp_file_start
+	if [ "$num_dir" -gt 0 ]; then
+		echo "<p>$num_dir directories found in config (to potentially update them)</p>" >> $tmp_file_start
+	else
+		echo "<p>no directory found in config file. This is just a log report</p>" >> $tmp_file_start
+	fi
 ### mail headers ###
 echo "From: $from" >> $tmp_file_headers
 echo "To: $to" >> $tmp_file_headers
 echo "Subject: $subject" >> $tmp_file_headers
 echo "Content-Type: text/html; charset=UTF-8" >> $tmp_file_headers
-mail_content="$(cat $tmp_file_headers $tmp_file_content)"
+mail_content="$(cat $tmp_file_headers $tmp_file_start $tmp_file_content)"
 echo "$mail_content" | /usr/sbin/sendmail -t 
 
 success "notification mail sent to $to"
 
-rm $tmp_file_content $tmp_file_headers
+rm $tmp_file_content $tmp_file_headers $tmp_file_start
 
 exit 0
 
