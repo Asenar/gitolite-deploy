@@ -36,7 +36,7 @@
 # 2013-07-10 :
 #  no more errors when pushing tags or deleting tags/branches :)
 #  changed some IFs into some CASEs
-#  better email subject
+#  better email subject
 #
 # INSTALLATION
 #
@@ -84,7 +84,7 @@ fail () {
 	exit 1
 }
 ####################################################
-
+# TODO : put that in /etc/gitolite-deploy.conf or something
 DEPLOY_CONFIG_DIR="/home/git/deploy/conf"
 if [ -f "$DEPLOY_CONFIG_DIR/config" ]; then
 	# local deploy
@@ -119,7 +119,7 @@ fi
 repo_name="${REPOSITORY_BASENAME%.git}"
 # TODO : handle cases like refs/tags/0.1
 branch="${refname#refs/heads/}"
-# that can be a tag?
+# that can be a tag?
 tag="${refname#refs/tags/}"
 
 # echo "check prod ..."
@@ -179,9 +179,10 @@ tmp_file_content=`mktemp`
 				fail ".git/logs/refs/remotes/origin/master is not writable. Unable to fetch origin"
 			fi
 
-			# debug mode
-			# set -x
+			# debug mode
+			# set -x
 			fetch_origin=$(git fetch origin 2>&1)
+			# set +x
 			last_err=$?
 			if [ "$last_err" -gt 0 ]; then
 				warning "oO error on git fetch origin (write perms in .git ? ) ? $last_err"
@@ -272,10 +273,10 @@ tmp_file_content=`mktemp`
 
 ################## SEND THAT EVERYTIME #############
 echo "<fieldset><legend class='ok'>GITOLITE</legend>" >> $tmp_file_content
-if [[ "$oldrev" = "$ZERO" ]] || [[ "$newrev" = "$ZERO" ]]; then
+if [[ "$oldrev" = "$ZERO" ]] || [[ "$newrev" = "$ZERO" ]]; then
 	case $refname in 
 		refs/heads/*)
-			if [[ "$newrev" = "$ZERO" ]]; then
+			if [[ "$newrev" = "$ZERO" ]]; then
 				echo "<p>branch <b>$refname</b> has been deleted" >> $tmp_file_content
 				email_title="branch '$branch' deleted"
 			else
@@ -285,7 +286,7 @@ if [[ "$oldrev" = "$ZERO" ]] || [[ "$newrev" = "$ZERO" ]]; then
 			;; 
 		refs/tags/*) 
 			echo "<p>new tag <b>$refname</b> pinned at <b>$newrev</b>" >> $tmp_file_content
-			if [[ "$newrev" = "$ZERO" ]]; then
+			if [[ "$newrev" = "$ZERO" ]]; then
 				email_title="tag '$tag' deleted"
 			else
 				email_title="new tag '$tag' created"
@@ -307,7 +308,7 @@ if [[ -n "$oldrev" ]] && [[ "$oldrev" != "$ZERO" ]] && [[ "$newrev" != "$ZERO" ]
 fi
 if [[ "$newrev" != "$ZERO" ]]; then
 	echo "<p>last commit details: <pre>" >> $tmp_file_content
-	git show $newrev |tr "<" "&lt;"|tr ">" "&gt;"| sed "s#\n#<br/>#" >> $tmp_file_content
+	git show $newrev |sed -e "s#<#\&lt;#g" -e "s#>#\&gt;#g" -e "s#\n#<br/>#" >> $tmp_file_content
 	echo "</pre></p>" >> $tmp_file_content
 fi
 	echo "</fieldset>" >> $tmp_file_content
