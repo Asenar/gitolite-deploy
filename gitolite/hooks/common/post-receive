@@ -7,7 +7,7 @@
 #
 # author : Michaël Marineti
 # creation : 2012-09-21
-# modified : 2013-07-17
+# modified : 2013-07-29
 #
 # LOG
 # 2012-09-26 : 
@@ -39,6 +39,9 @@
 #  better email subject
 # 2013-07-17 :
 #  add pusher/commiter/author infos
+# 2013-07-29 :
+#  untracked file list skips ignored files
+#  improve mail
 #
 # INSTALLATION
 #
@@ -75,7 +78,7 @@ notice () {
 	printf "\r  [\033[00;34mINFO\033[0m] $1\n"
 }
 info () {
-	printf "  [ \033[00;34m..\033[0m ] $1"
+	printf "\r  [ \033[00;34m..\033[0m ] $1\n"
 }
 success () {
 	printf "\r\033[2K  [ \033[00;32mOK\033[0m ] $1\n"
@@ -149,10 +152,11 @@ fi
 tmp_file_headers=`mktemp`
 tmp_file_start=`mktemp`
 tmp_file_content=`mktemp`
+tmp_loop_content=`mktemp`
 	echo "<html><head><title>gitolite push report</title>" >> $tmp_file_start
 	echo "<style>" >> $tmp_file_start
 	echo "body{font-family:Inconsolata,'Source Code Pro', DejaVu, Tahoma, courier}.ok,.warn,.error{font-weight:bold}" >> $tmp_file_start
-	echo "p{margin:5px;}.error{color:red;}.warn{color:orange}.ok{color:green}" >>$tmp_file_start
+	echo "p{margin:5px;}.error{color:red;}.info{color:#0077cc;}.warn{color:orange}.ok{color:green}" >>$tmp_file_start
 	echo "h1,h2,h3{margin:5px;}.loop-title{font-weight:bold;font-size:16px}" >> $tmp_file_start
 	echo "</style>" >> $tmp_file_start
 	echo "</head><body>" >> $tmp_file_start
@@ -160,20 +164,22 @@ tmp_file_content=`mktemp`
 
 
 	for each_config_key in ${!dirs[@]}; do
+		# reset file tmp_loop_content
+		:> $tmp_loop_content
 		dir=${dirs[$each_config_key]}
-		echo "<fieldset><legend class='loop-title'>LOOP when config_key=$each_config_key</legend>" >> $tmp_file_content
 		if [[ "$branch" = "$each_config_key" ]] || [[ "$each_config_key" = "all" ]]; then
+			echo "<fieldset><legend class='loop-title'>check for directory $dir with branch $each_config_key</legend>" >> $tmp_file_content
 				do_update=1
 			info "configuration found for $dir"
 			if [ "$each_config_key" = "all" ]; then
-				echo "<p>configuration found for '$dir' : update for any branch.</p>" >> $tmp_file_content
+				echo "<p>configuration found for '$dir' : update for any branch.</p>" >> $tmp_loop_content
 			else
-				echo "<p>configuration found for '$dir': update for branch '$branch' only</p>" >> $tmp_file_content
+				echo "<p>configuration found for '$dir': update for branch '$branch' only</p>" >> $tmp_loop_content
 			fi
 		else
+			echo "<fieldset><legend class='loop-title'>[INFO] $dir @$each_config_key)</legend>" >> $tmp_file_content
 			do_update=0
 			info "path '$dir' won't be updated." 
-			echo "<p>path '$dir' won't be updated.</p>" >> $tmp_file_content
 		fi
 
 		if [ -n "$dir" ]; then
@@ -202,7 +208,7 @@ tmp_file_content=`mktemp`
 						is_ancestor=
 					fi
 					has_modified_files="$(git diff --quiet || echo 1)"
-					has_untracked_files="$(git ls-files -o | grep >/dev/null . && echo 1 || echo '')"
+					has_untracked_files="$(git ls-files -o --exclude-standard | grep >/dev/null . && echo 1 || echo '')"
 					# better way to check if it's ancestor :
 					git_status_branch_humanreadable="<p>git status --branch --short<br/>$git_status_branch</p>"
 					
@@ -210,55 +216,61 @@ tmp_file_content=`mktemp`
 					current_branch=$(git symbolic-ref HEAD 2>/dev/null)
 					current_branch=${current_branch#refs/heads/}
 					if [[ "$last_err" -ne 0 ]]; then
-						echo "<p style='color:red;font-weight:bold'>ERROR on git fetch origin</p>" >> $tmp_file_content
+						echo "<p style='color:red;font-weight:bold'>ERROR on git fetch origin</p>" >> $tmp_loop_content
 					else
 						if [[ "$current_branch" = "$branch_to_update" ]]; then
 							if [[ -n "$fetch_origin" ]]; then
-								echo "<br/>fetch origin result: <br/>$fetch_origin</pre>" >> $tmp_file_content
+								echo "<br/>fetch origin result: <br/>$fetch_origin</pre>" >> $tmp_loop_content
 							fi
 							git_show_head="<p style='font-weight:bold'>git show HEAD</p><pre> $(git log -n1 --pretty=medium) </pre>"
 							if [ "$has_modified_files" -o "$has_untracked_files" ]; then
-								echo "<p class='error'>working directory is not clean." >> $tmp_file_content
-								echo "You need to commit all changes and remove untracked files.</p>" >> $tmp_file_content
-								echo "<b>pull aborted</b>" >> $tmp_file_content
+								echo "<p class='error'>working directory is not clean." >> $tmp_loop_content
+								echo "You need to commit all changes and remove untracked files.</p>" >> $tmp_loop_content
+								echo "<b>pull aborted</b>" >> $tmp_loop_content
 								if [ $has_modified_files ]; then
-									echo "<fieldset><legend class='error' >has modified files</legend><pre>" >> $tmp_file_content
+									echo "<fieldset><legend class='error' >has modified files</legend><pre>" >> $tmp_loop_content
 									# or git diff --name-only"
-									echo "$(git diff --stat)" >> $tmp_file_content
-									echo "</pre></fieldset>" >> $tmp_file_content
+									echo "$(git diff --stat)" >> $tmp_loop_content
+									echo "</pre></fieldset>" >> $tmp_loop_content
 								fi
 								if [ $has_untracked_files ]; then
-									echo "<fieldset><legend class='error'>has untracked files</legend><pre>" >> $tmp_file_content
-									echo "$(git ls-files -o  )" >> $tmp_file_content
-									echo "</pre></fieldset>" >> $tmp_file_content
+									echo "<fieldset><legend class='error'>has untracked files</legend><pre>" >> $tmp_loop_content
+									echo "$(git ls-files -o --exclude-standard  )" >> $tmp_loop_content
+									echo "</pre></fieldset>" >> $tmp_loop_content
 								fi
 							else
-								echo "<p>No modified, no tracked files :)</p>" >> $tmp_file_content
+								echo "<p>No modified, no tracked files :)</p>" >> $tmp_loop_content
 								if [ -z "$is_ancestor" ]; then
-									echo "<p class='error'>CANCELLED : branch is not ancestor($is_ancestor) (maybe it's in the future, or has diverged)</p>" >> $tmp_file_content
-									echo "$git_status_branch_humanreadable" >> $tmp_file_content
+									echo "<p class='error'>CANCELLED : branch is not ancestor($is_ancestor) (maybe it's in the future, or has diverged)</p>" >> $tmp_loop_content
+									echo "$git_status_branch_humanreadable" >> $tmp_loop_content
 								else
 									# TODO : replace that by "if can-do-fast-forward"
 									# MERGE : $(git merge --ff-only` to attempt the ff)
 									# JUST CHECKS : $(git merge-base --is-ancestor HEAD HEAD@{u}; echo $?)
-									if [ $last_err -eq 0 ]; then
-										echo "<p> git merge --ff-only --commit origin/$branch <pre>" >> $tmp_file_content
-										git merge --ff-only --commit origin/$branch >> $tmp_file_content 2>&1
-										last_err=$?
-										echo '</pre></p>' >> $tmp_file_content
-										if [ $last_err -ne 0 ]; then
-											echo "<p class='error'>ERROR on git merge --ff-only --commit origin/$branch</p>" >> $tmp_file_content
-										else
-											echo "<p class='ok'>MAJ OK</p>" >> $tmp_file_content
+									if [ "$do_update" -eq 1 ]; then
+										echo "<p>do_update=1</p>" >> $tmp_loop_content
+										if [ $last_err -eq 0 ]; then
+											echo "<p> git merge --ff-only --commit origin/$branch <pre>" >> $tmp_loop_content
+											git merge --ff-only --commit origin/$branch >> $tmp_loop_content 2>&1
+											last_err=$?
+											echo '</pre></p>' >> $tmp_loop_content
+												# show maj OK/ERROR at the top
+											if [ $last_err -ne 0 ]; then
+												echo "<p class='error'>ERROR on git merge --ff-only --commit origin/$branch</p>" >> $tmp_file_content
+											else
+												echo "<p class='ok'>MAJ OK</p>" >> $tmp_file_content
+											fi
 										fi
+									else
+										echo "<p>do_update=0, update skipped</p>" >> $tmp_loop_content
 									fi
 								fi
 							fi
-							echo "<small>" >> $tmp_file_content
-							echo "$git_show_head" >> $tmp_file_content
-							echo "</small>" >> $tmp_file_content
+							echo "<small>" >> $tmp_loop_content
+							echo "$git_show_head" >> $tmp_loop_content
+							echo "</small>" >> $tmp_loop_content
 						else
-							echo "<p class='warn'>MAJ SKIPPED (branch used=$current_branch instead of $branch_to_update)</p>" >> $tmp_file_content
+							echo "<p class='info'>This path is only updated when pushed branch is $current_branch (branch pushed is $branch_to_update)</p>" >> $tmp_loop_content
 						fi
 					fi
 				;;
@@ -271,6 +283,8 @@ tmp_file_content=`mktemp`
 			esac
 		fi
 		##### STOP LOCAL DEPLOY SCRIPT #####
+		cat $tmp_loop_content >> $tmp_file_content
+
 		echo '</fieldset>' >> $tmp_file_content
 	done
 
@@ -314,7 +328,7 @@ fi
 if [[ "$newrev" != "$ZERO" ]]; then
 	author=$(git --no-pager show $newrev -s --format='%an')
 	# commiter=$(git --no-pager show -s --format='%cn <%ce>')
-	echo "<p>last commit details ($author): <pre>" >> $tmp_file_content
+	echo "<p class='info'>last commit details ($author): <pre>" >> $tmp_file_content
 	git show $newrev |sed -e "s#<#\&lt;#g" -e "s#>#\&gt;#g" -e "s#\n#<br/>#" >> $tmp_file_content
 	echo "</pre></p>" >> $tmp_file_content
 else
@@ -344,7 +358,7 @@ echo "$mail_content" | /usr/sbin/sendmail -t
 
 success "notification mail sent to $to"
 
-rm $tmp_file_content $tmp_file_headers $tmp_file_start
+rm $tmp_file_content $tmp_file_headers $tmp_file_start $tmp_loop_content
 
 exit 0
 
