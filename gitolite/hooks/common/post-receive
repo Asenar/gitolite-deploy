@@ -42,6 +42,7 @@
 # 2013-07-29 :
 #  untracked file list skips ignored files
 #  improve mail
+#  add warning in console
 #
 # INSTALLATION
 #
@@ -71,6 +72,9 @@
 
 ZERO="0000000000000000000000000000000000000000"
 # some functions to put in a library later
+error () {
+	printf "\r  [\033[00;31mWARN\033[0m] $1\n"
+}
 warning () {
 	printf "\r  [\033[00;33mWARN\033[0m] $1\n"
 }
@@ -226,6 +230,7 @@ tmp_loop_content=`mktemp`
 							if [ "$has_modified_files" -o "$has_untracked_files" ]; then
 								echo "<p class='error'>working directory is not clean." >> $tmp_loop_content
 								echo "You need to commit all changes and remove untracked files.</p>" >> $tmp_loop_content
+								error "deploy aborted : directory is not clean (file modified or untracked present)" 
 								echo "<b>pull aborted</b>" >> $tmp_loop_content
 								if [ $has_modified_files ]; then
 									echo "<fieldset><legend class='error' >has modified files</legend><pre>" >> $tmp_loop_content
