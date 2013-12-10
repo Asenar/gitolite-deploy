@@ -1,0 +1,23 @@
+#!/bin/bash
+set -x
+mkdir test-hooks
+cd test-hooks
+git init depot1
+git init --bare depot-bare.git
+git init depot-prod
+cd depot1
+git remote add origin ../depot-bare.git/
+cd ../depot-prod
+git remote add origin ../depot-bare.git/
+cd ..
+
+git clone https://github.com/Asenar/gitolite-deploy
+
+cp gitolite-deploy/gitolite/hooks/common/post-receive depot-bare.git/hooks/post-receive
+current_dir=$(pwd)
+sed -i \
+	"s#DEPLOY_CONFIG_DIR=\"/home/git/deploy/conf\"\$#DEPLOY_CONFIG_DIR=\"${current_dir}/deploy\"#" \
+  depot-bare.git/hooks/post-receive
+cp -r gitolite-deploy/deploy deploy
+mv deploy/conf/reponame.conf deploy/conf/depot-bare.conf
+sed -i "s#/home/mwww/dev-or-whatever#${current_dir}/depot-prod#" deploy/conf/depot-bare.conf
