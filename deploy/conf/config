@@ -1,0 +1,5 @@
+#!/bin/bash
+
+from=git@hostname
+to=asenar@hostname
+append_git_command="sudo -u git"
