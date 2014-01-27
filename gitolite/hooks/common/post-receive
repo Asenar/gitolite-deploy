@@ -43,6 +43,13 @@
 #  untracked file list skips ignored files
 #  improve mail
 #  add warning in console
+# 2013-08-14 :
+#  var lowercase
+#  less multiple if/else, using continue instead
+#  mail notification display GITOLITE first, and deploy information last
+#  remote is still origin, but is now configurable
+#  no more fieldset for so few informations
+#  less info/notice/warn/error in terminal output
 #
 # INSTALLATION
 #
@@ -70,10 +77,10 @@
 ####################################################
 # set -x  # debug mode
 
-ZERO="0000000000000000000000000000000000000000"
+zero="0000000000000000000000000000000000000000"
 # some functions to put in a library later
 error () {
-	printf "\r  [\033[00;31mWARN\033[0m] $1\n"
+	printf "\r  [\033[00;31m✗_✗ \033[0m] $1\n"
 }
 warning () {
 	printf "\r  [\033[00;33mWARN\033[0m] $1\n"
@@ -94,25 +101,31 @@ fail () {
 }
 ####################################################
 # TODO : put that in /etc/gitolite-deploy.conf or something
-DEPLOY_CONFIG_DIR="/home/git/deploy/conf"
-if [ -f "$DEPLOY_CONFIG_DIR/config" ]; then
+deploy_config_dir="/data/git/deploy/conf"
+
+default_remote_name="origin"
+
+remote_name=${default_remote_name}
+if [ -f "$deploy_config_dir/config" ]; then
 	# local deploy
 	# echo "local deploy"
-	source $DEPLOY_CONFIG_DIR/config
+	source $deploy_config_dir/config
 else
-	notice "please create '$DEPLOY_CONFIG_DIR/config' containing :"
+	notice "please create '$deploy_config_dir/config' containing :"
 	echo "#!/bin/bash"
 	echo "from=sender@yourdomain.com"
 	echo "to=dest@yourdomain.com,user2@yourdomain.com"
+	echo "remote_name=origin"
 	echo ""
 	fail "Unable to continue without that configuration file."
 fi
 
 if [[ -z "$from" ]] || [[ -z "$to" ]]; then
-	notice "please create '$DEPLOY_CONFIG_DIR/config' containing :"
+	notice "please create '$deploy_config_dir/config' containing :"
 	echo "#!/bin/bash"
 	echo "from=sender@yourdomain.com"
 	echo "to=dest@yourdomain.com,user2@yourdomain.com"
+	echo "remote_name=origin"
 	echo ""
 	fail "Unable to continue without that configuration file."
 fi
@@ -120,14 +133,15 @@ fi
 read oldrev newrev refname
 
 pusher=${GL_USER}
-
+repository_root_dir="/data/git/repositories/"
 if [ $(git rev-parse --is-bare-repository) = true ]
 then
-	REPOSITORY_BASENAME="$(basename "$PWD")"
+	repository_basename="${PWD#$repository_root_dir}"
 else
-	REPOSITORY_BASENAME="$(basename $(readlink -nf "$PWD"/..))"
+	repository_basename="$(basename $(readlink -nf "$PWD"/..))"
 fi
-repo_name="${REPOSITORY_BASENAME%.git}"
+repo_name=${GL_REPO}
+# repo_name="${repository_basename%.git}"
 # TODO : handle cases like refs/tags/0.1
 branch="${refname#refs/heads/}"
 # that can be a tag?
@@ -144,215 +158,267 @@ if [ -z "$repo_name" ]; then
 	fail "repo_name is missing oO"
 fi
 
-if [ -f "$DEPLOY_CONFIG_DIR/$repo_name.conf" ]; then
+if [ -f "$deploy_config_dir/$repo_name.conf" ]; then
 	# local deploy
 	# echo "local deploy"
-	source $DEPLOY_CONFIG_DIR/$repo_name.conf
+	source $deploy_config_dir/$repo_name.conf
 else
 	warning "no configuration file found for deployment."
-	warning "create $DEPLOY_CONFIG_DIR/$repo_name.conf to avoid this message"
+	warning "create $deploy_config_dir/$repo_name.conf to avoid this message"
 fi
 
+# mail headers
 tmp_file_headers=`mktemp`
+# content email <head>
 tmp_file_start=`mktemp`
 tmp_file_content=`mktemp`
+# fill tmp_file_content at the end of each loop
 tmp_loop_content=`mktemp`
-	echo "<html><head><title>gitolite push report</title>" >> $tmp_file_start
-	echo "<style>" >> $tmp_file_start
-	echo "body{font-family:Inconsolata,'Source Code Pro', DejaVu, Tahoma, courier}.ok,.warn,.error{font-weight:bold}" >> $tmp_file_start
-	echo "p{margin:5px;}.error{color:red;}.info{color:#0077cc;}.warn{color:orange}.ok{color:green}" >>$tmp_file_start
-	echo "h1,h2,h3{margin:5px;}.loop-title{font-weight:bold;font-size:16px}" >> $tmp_file_start
-	echo "</style>" >> $tmp_file_start
-	echo "</head><body>" >> $tmp_file_start
-	num_dir=${#dirs[@]}
+echo "<html><head><title>gitolite push report</title>" >> $tmp_file_start
+echo "<style>" >> $tmp_file_start
+echo "body{font-family:Inconsolata,'Source Code Pro', DejaVu, Tahoma, courier}.ok,.warn,.error{font-weight:bold}" >> $tmp_file_start
+echo "p{margin:5px;}.error{color:red;}.info{color:#0077cc;}.warn{color:orange}.ok{color:green}" >>$tmp_file_start
+echo "h1,h2,h3{margin:5px;}.loop-title{font-weight:bold;font-size:16px}" >> $tmp_file_start
+echo "</style>" >> $tmp_file_start
+echo "</head><body>" >> $tmp_file_start
+num_dir=${#dirs[@]}
 
 
-	for each_config_key in ${!dirs[@]}; do
-		# reset file tmp_loop_content
-		:> $tmp_loop_content
-		dir=${dirs[$each_config_key]}
-		if [[ "$branch" = "$each_config_key" ]] || [[ "$each_config_key" = "all" ]]; then
-			echo "<fieldset><legend class='loop-title'>check for directory $dir with branch $each_config_key</legend>" >> $tmp_file_content
-				do_update=1
-			info "configuration found for $dir"
-			if [ "$each_config_key" = "all" ]; then
-				echo "<p>configuration found for '$dir' : update for any branch.</p>" >> $tmp_loop_content
-			else
-				echo "<p>configuration found for '$dir': update for branch '$branch' only</p>" >> $tmp_loop_content
-			fi
-		else
-			echo "<fieldset><legend class='loop-title'>[INFO] $dir @$each_config_key)</legend>" >> $tmp_file_content
-			do_update=0
-			info "path '$dir' won't be updated." 
+for each_config_key in ${!dirs[@]}; do
+	# reset file tmp_loop_content
+	:> $tmp_loop_content
+	dir=${dirs[$each_config_key]}
+	if [[ "$branch" = "$each_config_key" ]] || [[ "$each_config_key" = "all" ]]; then
+		echo "<fieldset><legend class='loop-title'>${dir}@${each_config_key}</legend>" >> $tmp_loop_content
+		do_update=1
+
+		#if [ "$each_config_key" = "all" ]; then
+		#	info "configuration found for '$dir' : update for any branch (key @all)."
+		#else
+		#	info "configuration found for '$dir': update for branch '$branch' only"
+		#fi
+	else
+		echo "<fieldset><legend class='loop-title'>[NOTICE] $dir@$each_config_key will not be updated</legend>" >> $tmp_loop_content
+		do_update=0
+	fi
+	if [ -n "$dir" ]; then
+		cd $dir
+		unset GIT_DIR
+		git_status_branch="$(git status --branch --short)"
+		if [[ -d ".git/logs/refs/remotes/${remote_name}" ]] && ! [[ -w ".git/logs/refs/remotes/${remote_name}" ]]; then
+			error ".git/logs/refs/remotes/${remote_name} (in $dir) is not writable. Unable to fetch"
+			echo "<p class='error'>" >> $tmp_file_content
+			echo "<b>.git/logs/refs/remotes/${remote_name}</b> (in $dir) is not writable. Unable to fetch<br/>" >> $tmp_file_content
+			echo "Error in $dir on branch $current_branch will not be updated</p>" >> $tmp_file_content
+			continue
 		fi
 
-		if [ -n "$dir" ]; then
-			cd $dir
-			unset GIT_DIR
-			git_status_branch="$(git status --branch --short)"
-			if ! [[ -w ".git/logs/refs/remotes/origin/master" ]]; then
-				fail ".git/logs/refs/remotes/origin/master is not writable. Unable to fetch origin"
-			fi
+		# debug mode
+		# set -x
+		fetch_origin=$(git fetch ${remote_name} 2>&1)
+		# set +x
+		last_err=$?
+		if [ "$last_err" -gt 0 ]; then
+			error "oO error on git fetch ${remote_name} (write perms in .git ? ) ? ErrorCode=$last_err"
+			error "$fetch_origin"
+			echo "<p class='error'>" >> $tmp_file_content
+			echo "<b>.git/logs/refs/remotes/${remote_name}</b> (in $dir) is maybe not fully writable by <b>git</b>.<br/>" >> $tmp_file_content
+			echo "<b>OR </b> the readonly user is not allowed to read (check gitolite config).<br/><br/>" >> $tmp_file_content
+			echo "Unable to fetch origin :<pre>${fetch_origin}</pre>" >> $tmp_file_content
+			echo "Error in $dir on branch $current_branch will not be updated</p>" >> $tmp_file_content
+			continue;
+		fi
+		# it's a branch update
+		case $refname in 
+			refs/heads/*)
+				is_ancestor="$(git merge-base --is-ancestor HEAD ${remote_name}/$branch; echo $?)"
+				if [ "$is_ancestor" -eq 0 ]; then
+					is_ancestor=true
+				else
+					is_ancestor=
+				fi
+				has_modified_files="$(git diff --quiet || echo 1)"
+				has_untracked_files="$(git ls-files -o --exclude-standard | grep >/dev/null . && echo 1 || echo '')"
+				# better way to check if it's ancestor :
+				git_status_branch_humanreadable="<p>git status --branch --short<br/>$git_status_branch</p>"
 
-			# debug mode
-			# set -x
-			fetch_origin=$(git fetch origin 2>&1)
-			# set +x
-			last_err=$?
-			if [ "$last_err" -gt 0 ]; then
-				warning "oO error on git fetch origin (write perms in .git ? ) ? $last_err"
-				echo "$last_err"
-			fi
-			case $refname in 
-				refs/heads/*)
-					is_ancestor="$(git merge-base --is-ancestor HEAD origin/$branch; echo $?)"
-					if [ "$is_ancestor" -eq 0 ]; then
-						is_ancestor=true
-					else
-						is_ancestor=
+				branch_to_update=$branch
+				current_branch=$(git symbolic-ref HEAD 2>/dev/null)
+				current_branch=${current_branch#refs/heads/}
+				if [[ "$current_branch" != "$branch_to_update" ]]; then
+					notice "path '$dir' has not been updated (branch is $current_branch instead of $branch_to_update)."
+					echo "<p class='info'>path '$dir' skipped ! (@$current_branch instead of $branch_to_update)</p>" >> $tmp_file_content
+					continue;
+				fi
+				if [[ -n "$fetch_origin" ]]; then
+					echo "<p>git fetch ${remote_name}<pre>$fetch_origin</pre></p>" >> $tmp_loop_content
+				fi
+				#git_show_head="<p style='font-weight:bold'>git show HEAD</p><pre> $(git log -n1 --pretty=medium) </pre>"
+				# CANCEL#1 - because has modified or untracked
+				if [ "$has_modified_files" -o "$has_untracked_files" ]; then
+					echo "<p class='error'>working directory is not clean." >> $tmp_loop_content
+					echo "You need to commit all changes and remove untracked files.</p>" >> $tmp_loop_content
+					warning "path '$dir' : deploy aborted : directory is not clean (file modified or untracked present)" 
+					info "to manually deploy, please do the following in $dir:"
+					echo "1 - get last references"
+					echo "* git fetch ${remote_name} $branch"
+					echo "2 - try a safe fast-forward merge"
+					echo "* git merge --ff --ff-only ${remote_name}/$branch"
+					echo "3 - if 2° didn't worked, have to update manually : "
+					echo "3-1 set the references to ${remote_name}/$branch"
+					echo "* git reset --soft ${remote_name}/$branch"
+					echo "3-1 use 'git reset -p', 'git checkout path/to/file', 'git difftool' to compare and restore files safely" 
+					echo "** git checkout path/to/file-i-m-sure-the-HEAD-is-ok"
+					echo "** git difftool path/to/file-i-want-to-compare-with-a-tool-like-vimdiff"
+					echo "** git reset -p path/to/file-i-wan-to-reset-changes-by-changes"
+					echo "<b>pull aborted</b>" >> $tmp_loop_content
+					if [ $has_modified_files ]; then
+						echo "<fieldset><legend class='error' >has modified files</legend><pre>" >> $tmp_loop_content
+						# or git diff --name-only"
+						echo "$(git diff --stat)" >> $tmp_loop_content
+						echo "</pre></fieldset>" >> $tmp_loop_content
 					fi
-					has_modified_files="$(git diff --quiet || echo 1)"
-					has_untracked_files="$(git ls-files -o --exclude-standard | grep >/dev/null . && echo 1 || echo '')"
-					# better way to check if it's ancestor :
-					git_status_branch_humanreadable="<p>git status --branch --short<br/>$git_status_branch</p>"
-					
-					branch_to_update=$branch
-					current_branch=$(git symbolic-ref HEAD 2>/dev/null)
-					current_branch=${current_branch#refs/heads/}
-					if [[ "$last_err" -ne 0 ]]; then
-						echo "<p style='color:red;font-weight:bold'>ERROR on git fetch origin</p>" >> $tmp_loop_content
-					else
-						if [[ "$current_branch" = "$branch_to_update" ]]; then
-							if [[ -n "$fetch_origin" ]]; then
-								echo "<br/>fetch origin result: <br/>$fetch_origin</pre>" >> $tmp_loop_content
-							fi
-							git_show_head="<p style='font-weight:bold'>git show HEAD</p><pre> $(git log -n1 --pretty=medium) </pre>"
-							if [ "$has_modified_files" -o "$has_untracked_files" ]; then
-								echo "<p class='error'>working directory is not clean." >> $tmp_loop_content
-								echo "You need to commit all changes and remove untracked files.</p>" >> $tmp_loop_content
-								error "deploy aborted : directory is not clean (file modified or untracked present)" 
-								echo "<b>pull aborted</b>" >> $tmp_loop_content
-								if [ $has_modified_files ]; then
-									echo "<fieldset><legend class='error' >has modified files</legend><pre>" >> $tmp_loop_content
-									# or git diff --name-only"
-									echo "$(git diff --stat)" >> $tmp_loop_content
-									echo "</pre></fieldset>" >> $tmp_loop_content
-								fi
-								if [ $has_untracked_files ]; then
-									echo "<fieldset><legend class='error'>has untracked files</legend><pre>" >> $tmp_loop_content
-									echo "$(git ls-files -o --exclude-standard  )" >> $tmp_loop_content
-									echo "</pre></fieldset>" >> $tmp_loop_content
-								fi
-							else
-								echo "<p>No modified, no tracked files :)</p>" >> $tmp_loop_content
-								if [ -z "$is_ancestor" ]; then
-									echo "<p class='error'>CANCELLED : branch is not ancestor($is_ancestor) (maybe it's in the future, or has diverged)</p>" >> $tmp_loop_content
-									echo "$git_status_branch_humanreadable" >> $tmp_loop_content
-								else
-									# TODO : replace that by "if can-do-fast-forward"
-									# MERGE : $(git merge --ff-only` to attempt the ff)
-									# JUST CHECKS : $(git merge-base --is-ancestor HEAD HEAD@{u}; echo $?)
-									if [ "$do_update" -eq 1 ]; then
-										echo "<p>do_update=1</p>" >> $tmp_loop_content
-										if [ $last_err -eq 0 ]; then
-											echo "<p> git merge --ff-only --commit origin/$branch <pre>" >> $tmp_loop_content
-											git merge --ff-only --commit origin/$branch >> $tmp_loop_content 2>&1
-											last_err=$?
-											echo '</pre></p>' >> $tmp_loop_content
-												# show maj OK/ERROR at the top
-											if [ $last_err -ne 0 ]; then
-												echo "<p class='error'>ERROR on git merge --ff-only --commit origin/$branch</p>" >> $tmp_file_content
-											else
-												echo "<p class='ok'>MAJ OK</p>" >> $tmp_file_content
-											fi
-										fi
-									else
-										echo "<p>do_update=0, update skipped</p>" >> $tmp_loop_content
-									fi
-								fi
-							fi
-							echo "<small>" >> $tmp_loop_content
-							echo "$git_show_head" >> $tmp_loop_content
-							echo "</small>" >> $tmp_loop_content
-						else
-							echo "<p class='info'>This path is only updated when pushed branch is $current_branch (branch pushed is $branch_to_update)</p>" >> $tmp_loop_content
-						fi
+					if [ $has_untracked_files ]; then
+						echo "<fieldset><legend class='error'>has untracked files</legend><pre>" >> $tmp_loop_content
+						echo "$(git ls-files -o --exclude-standard  )" >> $tmp_loop_content
+						echo "</pre></fieldset>" >> $tmp_loop_content
 					fi
+					echo '</fieldset>' >> $tmp_loop_content
+					cat $tmp_loop_content >> $tmp_file_content
+					continue;
+				fi
+				# CANCEL#2 - because current HEAD is not ancestor
+				if [ -z "$is_ancestor" ]; then
+					error "path '$dir' : branch is not ancestor($is_ancestor). something need to be done"
+					info "git status : ${git_status_branch_humanreadable}"
+					echo "<p class='error'>CANCELLED : branch is not ancestor($is_ancestor) (maybe it's in the future, or has diverged)</p>" >> $tmp_loop_content
+					echo "$git_status_branch_humanreadable" >> $tmp_loop_content
+					echo '</fieldset>' >> $tmp_loop_content
+					cat $tmp_loop_content >> $tmp_file_content
+					continue;
+				fi
+				# TODO : replace that by "if can-do-fast-forward"
+				# MERGE : $(git merge --ff-only` to attempt the ff)
+				# JUST CHECKS : $(git merge-base --is-ancestor HEAD HEAD@{u}; echo $?)
+
+				# CANCEL#3 - because that's not the correct branch
+				if [ "$do_update" -eq 0 ]; then
+					info "no update (wrong branch) for dir $dir"
+					continue;
+				fi
+
+				notice "using 'git merge --ff-only --commit ${remote_name}/$branch' to deploy ..."
+				merge_result=$(git merge --ff-only --commit ${remote_name}/$branch 2>&1)
+				#			 merge_result=$(sudo -u www-data git merge --ff-only --commit ${remote_name}/$branch 2>&1)
+				last_err=$?
+				# show maj OK/ERROR at the top
+				if [ $last_err -gt 0 ]; then
+					error "Merge error for path '$dir' "
+					info "$merge_result"
+					echo "<p class='error'>ERROR on git merge --ff-only --commit ${remote_name}/$branch" >> $tmp_loop_content
+					echo "Maybe only half files has been updated" >> $tmp_loop_content
+					echo "<pre>" >> $tmp_loop_content
+					echo "$merge_result</pre></p>" >> $tmp_loop_content
+
+					# show an informative message
+					msg_need_reset="You may need to restore '$dir' with 'git reset --hard' or simply set correct permissions"
+					echo "<p class='error'>$msg_need_reset</p>" >> $tmp_loop_content
+					error "$msg_need_reset"
+
+					# do the reset automatically
+					# reset_result=$(git reset --hard $oldrev 2>&1)
+					# reset_err=$?
+					# echo "<p class='error'>RESTORED WITH git reset --hard<pre>" >> $tmp_loop_content
+					# if [ $reset_err -gt 0 ]; then
+					# 	notice "Operation cancelled (git reset --hard $oldrev)"
+					# else
+					# 	error "ERROR on git reset --hard $oldrev"
+					# fi
+					# info "$reset_result"
+					# echo "$reset_result</pre></p>" >> $tmp_loop_content
+				else
+					success "Merge done for path '$dir' "
+					echo "<p class='ok'>SUCCESS on git merge --ff-only --commit ${remote_name}/$branch<pre>" >> $tmp_loop_content
+					echo "$merge_result</pre></p>" >> $tmp_loop_content
+				fi
+				#echo "<small>" >> $tmp_loop_content
+				#echo "$git_show_head" >> $tmp_loop_content
+				#echo "</small>" >> $tmp_loop_content
 				;;
-				refs/tags/*)
-					echo "Nothing done when pushing tags"
-					;;
-				*)
-					echo "not a tag, not a branch, so what is that ???"
-					;;
-			esac
-		fi
-		##### STOP LOCAL DEPLOY SCRIPT #####
-		cat $tmp_loop_content >> $tmp_file_content
-
-		echo '</fieldset>' >> $tmp_file_content
-	done
+			refs/tags/*)
+				echo "Nothing done when pushing tags"
+				;;
+			*)
+				echo "not a tag, not a branch, so what is that ???"
+				;;
+		esac
+	fi
+	##### STOP LOCAL DEPLOY SCRIPT #####
+	cat $tmp_loop_content >> $tmp_file_content
+	echo '</fieldset>' >> $tmp_file_content
+done
 
 
 
 ################## SEND THAT EVERYTIME #############
-echo "<fieldset><legend class='ok'>GITOLITE</legend><p>pushed by $pusher</p>" >> $tmp_file_content
-if [[ "$oldrev" = "$ZERO" ]] || [[ "$newrev" = "$ZERO" ]]; then
+echo "<fieldset><legend class='ok'>GITOLITE</legend><p>pushed by $pusher</p>" >> $tmp_file_start
+if [[ "$oldrev" = "$zero" ]] || [[ "$newrev" = "$zero" ]]; then
 	case $refname in 
 		refs/heads/*)
-			if [[ "$newrev" = "$ZERO" ]]; then
-				echo "<p>branch <b>$refname</b> has been deleted" >> $tmp_file_content
+			if [[ "$newrev" = "$zero" ]]; then
+				echo "<p>branch <b>$refname</b> has been deleted" >> $tmp_file_start
 				email_title="branch '$branch' deleted"
 			else
-				echo "<p>new branch <b>$refname</b> pushed and set to <b>$newrev</b>" >> $tmp_file_content
+				echo "<p>new branch <b>$refname</b> pushed and set to <b>$newrev</b>" >> $tmp_file_start
 				email_title="new branch '$branch' created"
 			fi
 			;; 
 		refs/tags/*) 
-			echo "<p>new tag <b>$refname</b> pinned at <b>$newrev</b>" >> $tmp_file_content
-			if [[ "$newrev" = "$ZERO" ]]; then
+			echo "<p>new tag <b>$refname</b> pinned at <b>$newrev</b>" >> $tmp_file_start
+			if [[ "$newrev" = "$zero" ]]; then
 				email_title="tag '$tag' deleted"
 			else
-				email_title="new tag '$tag' created"
+				email_title="TAG '$tag' created"
+				echo "<p>Dear maintainer, can you please update the server to the tag ${tag} ?</p>" >> $tmp_file_start
 			fi
 			;; 
 		*) 
-			echo "random ref <b>$refname</b> has been ... what ?" >> $tmp_file_content
+			echo "random ref <b>$refname</b> has been ... wait, what ?" >> $tmp_file_start
 			email_title="random ref '$refname' created"
 			;;
 	esac
 else
-	echo "<p><b>$refname</b> has been updated (from <b>$oldrev</b> to <b>$newrev</b>) </p>" >> $tmp_file_content
+	echo "<p><b>$refname</b> has been updated (from <b>$oldrev</b> to <b>$newrev</b>) </p>" >> $tmp_file_start
 	email_title="branch '$branch' updated"
 fi
-if [[ -n "$oldrev" ]] && [[ "$oldrev" != "$ZERO" ]] && [[ "$newrev" != "$ZERO" ]]; then
-	echo "<p>commit logs:<br/><pre>" >> $tmp_file_content
-	git log --pretty=oneline --abbrev-commit $oldrev..$newrev | sed "s#\n#<br/>#" >> $tmp_file_content
-	echo "</pre></p>" >> $tmp_file_content
+if [[ -n "$oldrev" ]] && [[ "$oldrev" != "$zero" ]] && [[ "$newrev" != "$zero" ]]; then
+	echo "<p>commit logs:<br/><pre>" >> $tmp_file_start
+	git log --pretty=oneline --abbrev-commit $oldrev..$newrev | sed "s#\n#<br/>#" >> $tmp_file_start
+	echo "</pre></p>" >> $tmp_file_start
 fi
-if [[ "$newrev" != "$ZERO" ]]; then
-	author=$(git --no-pager show $newrev -s --format='%an')
+if [[ "$newrev" != "$zero" ]]; then
+	author="$(git --no-pager show $newrev -s --format='%an')"
 	# commiter=$(git --no-pager show -s --format='%cn <%ce>')
-	echo "<p class='info'>last commit details ($author): <pre>" >> $tmp_file_content
-	git show $newrev |sed -e "s#<#\&lt;#g" -e "s#>#\&gt;#g" -e "s#\n#<br/>#" >> $tmp_file_content
-	echo "</pre></p>" >> $tmp_file_content
+	echo "<p class='info'>last commit details ($author): <pre>" >> $tmp_file_start
+	git show $newrev |sed -e "s#<#\&lt;#g" -e "s#>#\&gt;#g" -e "s#\n#<br/>#" >> $tmp_file_start
+	echo "</pre></p>" >> $tmp_file_start
 else
-	author=$pusher
+	author="$pusher"
 fi
-	echo "</fieldset>" >> $tmp_file_content
-	echo "</body></html>" >> $tmp_file_content
+echo "</fieldset>" >> $tmp_file_start
 ######################################################
+echo "</body></html>" >> $tmp_file_content
 
 
 ### mail content ###
-subject="[repo $repo_name ($author)] $email_title"
+subject="[repo $repo_name] $email_title (by $author)"
 
-	echo "<p>author = $author, pusher = $pusher </p>" >> $tmp_file_start
-	if [ "$num_dir" -gt 0 ]; then
-		echo "<p>$num_dir directories found in config (to potentially update them)</p>" >> $tmp_file_start
-	else
-		echo "<p>no directory found in config file. This is just a log report</p>" >> $tmp_file_start
-	fi
+echo "<p>author = $author, pusher = $pusher </p>" >> $tmp_file_start
+if [ "$num_dir" -gt 0 ]; then
+	echo "<hr/><p>$num_dir directories found in config (to potentially update them)</p>" >> $tmp_file_start
+else
+	echo "<hr/><p>no directory found in config file. This is just a log report</p>" >> $tmp_file_start
+fi
 ### mail headers ###
 echo "From: $from" >> $tmp_file_headers
 echo "To: $to" >> $tmp_file_headers
@@ -361,7 +427,7 @@ echo "Content-Type: text/html; charset=UTF-8" >> $tmp_file_headers
 mail_content="$(cat $tmp_file_headers $tmp_file_start $tmp_file_content)"
 echo "$mail_content" | /usr/sbin/sendmail -t 
 
-success "notification mail sent to $to"
+info "notification mail sent to $to"
 
 rm $tmp_file_content $tmp_file_headers $tmp_file_start $tmp_loop_content
 
