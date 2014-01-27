@@ -184,21 +184,21 @@ echo "</head><body>" >> $tmp_file_start
 num_dir=${#dirs[@]}
 
 
-for each_config_key in ${!dirs[@]}; do
+for dir in ${!dirs[@]}; do
 	# reset file tmp_loop_content
 	:> $tmp_loop_content
-	dir=${dirs[$each_config_key]}
-	if [[ "$branch" = "$each_config_key" ]] || [[ "$each_config_key" = "all" ]]; then
-		echo "<fieldset><legend class='loop-title'>${dir}@${each_config_key}</legend>" >> $tmp_loop_content
+	config_branch=${dirs[$dir]}
+	if [[ "$branch" = "$config_branch" ]] || [[ "$config_branch" = "all" ]]; then
+		echo "<fieldset><legend class='loop-title'>${dir}@${config_branch}</legend>" >> $tmp_loop_content
 		do_update=1
 
-		#if [ "$each_config_key" = "all" ]; then
+		#if [ "$config_branch" = "all" ]; then
 		#	info "configuration found for '$dir' : update for any branch (key @all)."
 		#else
 		#	info "configuration found for '$dir': update for branch '$branch' only"
 		#fi
 	else
-		echo "<fieldset><legend class='loop-title'>[NOTICE] $dir@$each_config_key will not be updated</legend>" >> $tmp_loop_content
+		echo "<fieldset><legend class='loop-title'>[NOTICE] $dir@$config_branch will not be updated</legend>" >> $tmp_loop_content
 		do_update=0
 	fi
 	if [ -d "$dir" ]; then
