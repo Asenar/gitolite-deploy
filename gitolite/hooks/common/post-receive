@@ -201,7 +201,7 @@ for each_config_key in ${!dirs[@]}; do
 		echo "<fieldset><legend class='loop-title'>[NOTICE] $dir@$each_config_key will not be updated</legend>" >> $tmp_loop_content
 		do_update=0
 	fi
-	if [ -n "$dir" ]; then
+	if [ -d "$dir" ]; then
 		cd $dir
 		unset GIT_DIR
 		git_status_branch="$(git status --branch --short)"
@@ -258,28 +258,16 @@ for each_config_key in ${!dirs[@]}; do
 				if [ "$has_modified_files" -o "$has_untracked_files" ]; then
 					echo "<p class='error'>working directory is not clean." >> $tmp_loop_content
 					echo "You need to commit all changes and remove untracked files.</p>" >> $tmp_loop_content
-					warning "path '$dir' : deploy aborted : directory is not clean (file modified or untracked present)" 
+					warning "path '$dir' : deploy aborted : directory is not clean (file modified or untracked exists)"
 					info "to manually deploy, please do the following in $dir:"
-					echo "1 - get last references"
-					echo "* git fetch ${remote_name} $branch"
-					echo "2 - try a safe fast-forward merge"
-					echo "* git merge --ff --ff-only ${remote_name}/$branch"
-					echo "3 - if 2° didn't worked, have to update manually : "
-					echo "3-1 set the references to ${remote_name}/$branch"
-					echo "* git reset --soft ${remote_name}/$branch"
-					echo "3-1 use 'git reset -p', 'git checkout path/to/file', 'git difftool' to compare and restore files safely" 
-					echo "** git checkout path/to/file-i-m-sure-the-HEAD-is-ok"
-					echo "** git difftool path/to/file-i-want-to-compare-with-a-tool-like-vimdiff"
-					echo "** git reset -p path/to/file-i-wan-to-reset-changes-by-changes"
-					echo "<b>pull aborted</b>" >> $tmp_loop_content
 					if [ $has_modified_files ]; then
-						echo "<fieldset><legend class='error' >has modified files</legend><pre>" >> $tmp_loop_content
+						echo "<fieldset><legend class='error' >modified files list</legend><pre>" >> $tmp_loop_content
 						# or git diff --name-only"
 						echo "$(git diff --stat)" >> $tmp_loop_content
 						echo "</pre></fieldset>" >> $tmp_loop_content
 					fi
 					if [ $has_untracked_files ]; then
-						echo "<fieldset><legend class='error'>has untracked files</legend><pre>" >> $tmp_loop_content
+						echo "<fieldset><legend class='error'>untracked files list</legend><pre>" >> $tmp_loop_content
 						echo "$(git ls-files -o --exclude-standard  )" >> $tmp_loop_content
 						echo "</pre></fieldset>" >> $tmp_loop_content
 					fi
@@ -297,9 +285,6 @@ for each_config_key in ${!dirs[@]}; do
 					cat $tmp_loop_content >> $tmp_file_content
 					continue;
 				fi
-				# TODO : replace that by "if can-do-fast-forward"
-				# MERGE : $(git merge --ff-only` to attempt the ff)
-				# JUST CHECKS : $(git merge-base --is-ancestor HEAD HEAD@{u}; echo $?)
 
 				# CANCEL#3 - because that's not the correct branch
 				if [ "$do_update" -eq 0 ]; then
@@ -309,9 +294,8 @@ for each_config_key in ${!dirs[@]}; do
 
 				notice "using 'git merge --ff-only --commit ${remote_name}/$branch' to deploy ..."
 				merge_result=$(git merge --ff-only --commit ${remote_name}/$branch 2>&1)
-				#			 merge_result=$(sudo -u www-data git merge --ff-only --commit ${remote_name}/$branch 2>&1)
 				last_err=$?
-				# show maj OK/ERROR at the top
+				# show maj OK/ERROR at the top
 				if [ $last_err -gt 0 ]; then
 					error "Merge error for path '$dir' "
 					info "$merge_result"
@@ -346,7 +330,7 @@ for each_config_key in ${!dirs[@]}; do
 				#echo "</small>" >> $tmp_loop_content
 				;;
 			refs/tags/*)
-				echo "Nothing done when pushing tags"
+				echo "Nothing done when pushing tags (yet)"
 				;;
 			*)
 				echo "not a tag, not a branch, so what is that ???"
