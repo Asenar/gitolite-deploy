@@ -293,7 +293,7 @@ for dir in ${!dirs[@]}; do
 				fi
 
 				notice "using 'git merge --ff-only --commit ${remote_name}/$branch' to deploy ..."
-				merge_result=$(git merge --ff-only --commit ${remote_name}/$branch 2>&1)
+				merge_result=$($append_git_command git merge --ff-only --commit ${remote_name}/$branch 2>&1)
 				last_err=$?
 				# show maj OK/ERROR at the top
 				if [ $last_err -gt 0 ]; then
