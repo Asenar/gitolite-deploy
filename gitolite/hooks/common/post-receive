@@ -101,7 +101,7 @@ fail () {
 }
 ####################################################
 # TODO : put that in /etc/gitolite-deploy.conf or something
-deploy_config_dir="/data/git/deploy/conf"
+deploy_config_dir="/home/git/deploy/conf"
 
 default_remote_name="origin"
 
@@ -133,15 +133,17 @@ fi
 read oldrev newrev refname
 
 pusher=${GL_USER}
-repository_root_dir="/data/git/repositories/"
+# repository_root_dir is in conf/
 if [ $(git rev-parse --is-bare-repository) = true ]
 then
 	repository_basename="${PWD#$repository_root_dir}"
 else
 	repository_basename="$(basename $(readlink -nf "$PWD"/..))"
 fi
-repo_name=${GL_REPO}
-# repo_name="${repository_basename%.git}"
+# repo_name=${GL_REPO}
+repo_name="${repository_basename%.git}"
+repo_name="${repository_basename#$repository_root_dir}"
+
 # TODO : handle cases like refs/tags/0.1
 branch="${refname#refs/heads/}"
 # that can be a tag?
@@ -165,6 +167,15 @@ if [ -f "$deploy_config_dir/$repo_name.conf" ]; then
 else
 	warning "no configuration file found for deployment."
 	warning "create $deploy_config_dir/$repo_name.conf to avoid this message"
+fi
+
+if [ ! -z "$mirror_remote" ]; then
+  echo "mirror_remote found : $mirror_remote"
+  # git push $mirror_remote --mirror
+  # echo "git push -vv $mirror_remote $branch"
+  git push $mirror_remote $branch
+  # git push $mirror_remote --all
+  # git push github --tags
 fi
 
 # mail headers
@@ -204,7 +215,7 @@ for dir in ${!dirs[@]}; do
 	if [ -d "$dir" ]; then
 		cd $dir
 		unset GIT_DIR
-		git_status_branch="$(git status --branch --short)"
+		git_status_branch="$($append_git_command git status --branch --short)"
 		if [[ -d ".git/logs/refs/remotes/${remote_name}" ]] && ! [[ -w ".git/logs/refs/remotes/${remote_name}" ]]; then
 			error ".git/logs/refs/remotes/${remote_name} (in $dir) is not writable. Unable to fetch"
 			echo "<p class='error'>" >> $tmp_file_content
@@ -215,7 +226,7 @@ for dir in ${!dirs[@]}; do
 
 		# debug mode
 		# set -x
-		fetch_origin=$(git fetch ${remote_name} 2>&1)
+		fetch_origin=$($append_git_command git fetch ${remote_name} 2>&1)
 		# set +x
 		last_err=$?
 		if [ "$last_err" -gt 0 ]; then
@@ -231,19 +242,19 @@ for dir in ${!dirs[@]}; do
 		# it's a branch update
 		case $refname in 
 			refs/heads/*)
-				is_ancestor="$(git merge-base --is-ancestor HEAD ${remote_name}/$branch; echo $?)"
+				is_ancestor="$($append_git_command git merge-base --is-ancestor HEAD ${remote_name}/$branch; echo $?)"
 				if [ "$is_ancestor" -eq 0 ]; then
 					is_ancestor=true
 				else
 					is_ancestor=
 				fi
-				has_modified_files="$(git diff --quiet || echo 1)"
-				has_untracked_files="$(git ls-files -o --exclude-standard | grep >/dev/null . && echo 1 || echo '')"
+				has_modified_files="$($append_git_command git diff --quiet || echo 1)"
+				has_untracked_files="$($append_git_command git ls-files -o --exclude-standard | grep >/dev/null . && echo 1 || echo '')"
 				# better way to check if it's ancestor :
 				git_status_branch_humanreadable="<p>git status --branch --short<br/>$git_status_branch</p>"
 
 				branch_to_update=$branch
-				current_branch=$(git symbolic-ref HEAD 2>/dev/null)
+				current_branch=$($append_git_command git symbolic-ref HEAD 2>/dev/null)
 				current_branch=${current_branch#refs/heads/}
 				if [[ "$current_branch" != "$branch_to_update" ]]; then
 					notice "path '$dir' has not been updated (branch is $current_branch instead of $branch_to_update)."
@@ -259,16 +270,17 @@ for dir in ${!dirs[@]}; do
 					echo "<p class='error'>working directory is not clean." >> $tmp_loop_content
 					echo "You need to commit all changes and remove untracked files.</p>" >> $tmp_loop_content
 					warning "path '$dir' : deploy aborted : directory is not clean (file modified or untracked exists)"
-					info "to manually deploy, please do the following in $dir:"
+					info "to manually deploy, execute the command in $dir:"
+          info "     git fetch && git merge --ff-only ${remote_name}/$branch' "
 					if [ $has_modified_files ]; then
 						echo "<fieldset><legend class='error' >modified files list</legend><pre>" >> $tmp_loop_content
 						# or git diff --name-only"
-						echo "$(git diff --stat)" >> $tmp_loop_content
+						echo "$($append_git_command git diff --stat)" >> $tmp_loop_content
 						echo "</pre></fieldset>" >> $tmp_loop_content
 					fi
 					if [ $has_untracked_files ]; then
 						echo "<fieldset><legend class='error'>untracked files list</legend><pre>" >> $tmp_loop_content
-						echo "$(git ls-files -o --exclude-standard  )" >> $tmp_loop_content
+						echo "$($append_git_command git ls-files -o --exclude-standard  )" >> $tmp_loop_content
 						echo "</pre></fieldset>" >> $tmp_loop_content
 					fi
 					echo '</fieldset>' >> $tmp_loop_content
@@ -292,7 +304,7 @@ for dir in ${!dirs[@]}; do
 					continue;
 				fi
 
-				notice "using 'git merge --ff-only --commit ${remote_name}/$branch' to deploy ..."
+				notice "using '$append_git_command git merge --ff-only --commit ${remote_name}/$branch' to deploy ..."
 				merge_result=$($append_git_command git merge --ff-only --commit ${remote_name}/$branch 2>&1)
 				last_err=$?
 				# show maj OK/ERROR at the top
@@ -322,8 +334,12 @@ for dir in ${!dirs[@]}; do
 					# echo "$reset_result</pre></p>" >> $tmp_loop_content
 				else
 					success "Merge done for path '$dir' "
-					echo "<p class='ok'>SUCCESS on git merge --ff-only --commit ${remote_name}/$branch<pre>" >> $tmp_loop_content
+					echo "<p class='ok'>SUCCESS on $append_git_command git merge --ff-only ${remote_name}/$branch" >> $tmp_loop_content
+          echo "START_RES ----------------" >> $tmp_loop_content
+          echo "<pre>" >> $tmp_loop_content
 					echo "$merge_result</pre></p>" >> $tmp_loop_content
+          echo "END_RES ------------------" >> $tmp_loop_content
+          ## ADDITIONNAL PROCESS HERE?
 				fi
 				#echo "<small>" >> $tmp_loop_content
 				#echo "$git_show_head" >> $tmp_loop_content
@@ -377,14 +393,14 @@ else
 fi
 if [[ -n "$oldrev" ]] && [[ "$oldrev" != "$zero" ]] && [[ "$newrev" != "$zero" ]]; then
 	echo "<p>commit logs:<br/><pre>" >> $tmp_file_start
-	git log --pretty=oneline --abbrev-commit $oldrev..$newrev | sed "s#\n#<br/>#" >> $tmp_file_start
+	$append_git_command git log --pretty=oneline --abbrev-commit $oldrev..$newrev | sed "s#\n#<br/>#" >> $tmp_file_start
 	echo "</pre></p>" >> $tmp_file_start
 fi
 if [[ "$newrev" != "$zero" ]]; then
-	author="$(git --no-pager show $newrev -s --format='%an')"
-	# commiter=$(git --no-pager show -s --format='%cn <%ce>')
+	author="$($append_git_command git --no-pager show $newrev -s --format='%an')"
+	# commiter=$($append_git_command git --no-pager show -s --format='%cn <%ce>')
 	echo "<p class='info'>last commit details ($author): <pre>" >> $tmp_file_start
-	git show $newrev |sed -e "s#<#\&lt;#g" -e "s#>#\&gt;#g" -e "s#\n#<br/>#" >> $tmp_file_start
+	$append_git_command git show $newrev |sed -e "s#<#\&lt;#g" -e "s#>#\&gt;#g" -e "s#\n#<br/>#" >> $tmp_file_start
 	echo "</pre></p>" >> $tmp_file_start
 else
 	author="$pusher"
@@ -409,11 +425,17 @@ echo "To: $to" >> $tmp_file_headers
 echo "Subject: $subject" >> $tmp_file_headers
 echo "Content-Type: text/html; charset=UTF-8" >> $tmp_file_headers
 mail_content="$(cat $tmp_file_headers $tmp_file_start $tmp_file_content)"
-echo "$mail_content" | /usr/sbin/sendmail -t 
+sendmail_output=$(echo "$mail_content" | /usr/sbin/sendmail -t )
 
 info "notification mail sent to $to"
 
 rm $tmp_file_content $tmp_file_headers $tmp_file_start $tmp_loop_content
+
+# echo ""
+# echo " --- html2text ---"
+# echo "$mail_content"|html2text
+# echo " --- "
+# echo ""
 
 exit 0
 
