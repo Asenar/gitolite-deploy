@@ -3,3 +3,7 @@
 from=git@hostname
 to=asenar@hostname
 append_git_command="sudo -u git"
+
+remote_name=origin
+repository_root_dir="/home/git/repositories/"
+
